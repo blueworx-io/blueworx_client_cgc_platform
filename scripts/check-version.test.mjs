@@ -65,3 +65,24 @@ test('nothing staged passes', () => {
   assert.deepEqual(check(r.dir), []);
   rmSync(r.dir, { recursive: true, force: true });
 });
+
+test('staged bump with unstaged package.json is blocked', () => {
+  const r = repo();
+  r.write('0.1.0');
+  r.g('add', '-A');
+  r.g('commit', '-q', '-m', 'one');
+  writeFileSync(join(r.dir, 'cgc-championship.php'), plugin('0.1.1'));
+  r.g('add', 'cgc-championship.php');
+  writeFileSync(join(r.dir, 'package.json'), pkg('0.1.1')); // on disk only, not staged.
+  assert.match(check(r.dir).join(' '), /package.json/);
+  rmSync(r.dir, { recursive: true, force: true });
+});
+
+test('a missing base ref is an error', () => {
+  const r = repo();
+  r.write('0.1.0');
+  r.g('add', '-A');
+  r.g('commit', '-q', '-m', 'one');
+  assert.match(check(r.dir, 'origin/nope').join(' '), /does not exist/);
+  rmSync(r.dir, { recursive: true, force: true });
+});

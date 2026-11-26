@@ -426,12 +426,12 @@ final class Schema {
 				'cols' => array(
 					'actor_user_id' => 'fk',
 					'action'        => 'str',
-					'entity_type'   => 'str',
+					'entity_type'   => "VARCHAR(100) NOT NULL DEFAULT ''", // Short enough for the 768-byte index limit.
 					'entity_id'     => 'fk',
 					'before_json'   => 'json',
 					'after_json'    => 'json',
 					'reason'        => 'text',
-					'ip'            => 'status',
+					'ip'            => "VARCHAR(45) NOT NULL DEFAULT ''", // Fits IPv6 text.
 				),
 				'keys' => array( 'KEY entity (entity_type, entity_id)', 'KEY actor_user_id (actor_user_id)' ),
 			),

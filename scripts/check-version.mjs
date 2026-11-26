@@ -40,32 +40,38 @@ export function check(root, base = null) {
   const file = join(root, MAIN_FILE);
   if (!existsSync(file)) return [`${MAIN_FILE} not found`];
 
-  const current = readFileSync(file, 'utf8');
+  // Hook mode compares what is staged (Git's snapshot), not the files on disk.
+  const stagedFiles = base ? null : git(root, ['diff', '--cached', '--name-only']);
+  const hookMode = !base && stagedFiles !== null && stagedFiles.trim() !== '';
+  const read = (name) => (hookMode ? git(root, ['show', `:${name}`]) : null) ?? (existsSync(join(root, name)) ? readFileSync(join(root, name), 'utf8') : null);
+
+  const current = read(MAIN_FILE);
   const header = headerVersion(current);
   const constant = constantVersion(current);
   if (!header) errors.push('Version header not found in plugin file.');
   if (header !== constant) errors.push(`Version header (${header}) and CGC_VERSION (${constant}) differ.`);
 
-  const pkgPath = join(root, 'package.json');
-  if (existsSync(pkgPath)) {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
+  const pkgText = read('package.json');
+  if (pkgText !== null) {
+    const pkg = JSON.parse(pkgText).version;
     if (pkg !== header) errors.push(`package.json version (${pkg}) differs from the plugin header (${header}).`);
   }
 
-  let before;
-  let staged = header;
+  let before = null;
   if (base) {
+    if (git(root, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]) === null) {
+      errors.push(`Base ref "${base}" does not exist. Fetch it first (for example git fetch origin main).`);
+      return errors;
+    }
     before = git(root, ['show', `${base}:${MAIN_FILE}`]);
-  } else {
-    const stagedFiles = git(root, ['diff', '--cached', '--name-only']);
-    if (stagedFiles === null || stagedFiles.trim() === '') return errors; // nothing to commit.
+  } else if (hookMode) {
     before = git(root, ['show', `HEAD:${MAIN_FILE}`]);
-    const stagedPhp = git(root, ['show', `:${MAIN_FILE}`]);
-    staged = stagedPhp ? headerVersion(stagedPhp) : header;
+  } else {
+    return errors; // nothing to commit.
   }
 
-  if (before !== null && staged === headerVersion(before)) {
-    errors.push(`Version was not bumped (still ${staged}). Raise Version and CGC_VERSION in ${MAIN_FILE} and package.json.`);
+  if (before !== null && header === headerVersion(before)) {
+    errors.push(`Version was not bumped (still ${header}). Raise Version and CGC_VERSION in ${MAIN_FILE} and package.json.`);
   }
   return errors;
 }

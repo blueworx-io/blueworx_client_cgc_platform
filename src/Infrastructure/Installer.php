@@ -36,9 +36,12 @@ final class Installer {
 	}
 
 	/**
-	 * Creates or updates tables, roles and the default tenant.
+	 * Creates or updates tables, roles and the default tenant. The schema version is
+	 * saved only when every table and the default tenant exist, so a failed install retries.
+	 *
+	 * @return bool Whether the install completed.
 	 */
-	public static function install(): void {
+	public static function install(): bool {
 		global $wpdb;
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -48,25 +51,37 @@ final class Installer {
 		}
 
 		Roles::sync();
-		self::ensure_default_tenant();
+
+		foreach ( Schema::table_names() as $short ) {
+			$table = Schema::table( $short );
+			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
+				return false;
+			}
+		}
+		if ( ! self::ensure_default_tenant() ) {
+			return false;
+		}
 
 		update_option( self::DB_VERSION_OPTION, CGC_DB_VERSION );
+		return true;
 	}
 
 	/**
 	 * Makes sure tenant 1 exists, because every table defaults to tenant_id = 1.
+	 *
+	 * @return bool Whether the tenant exists afterwards.
 	 */
-	private static function ensure_default_tenant(): void {
+	private static function ensure_default_tenant(): bool {
 		global $wpdb;
 
 		$table  = Schema::table( 'tenants' );
 		$exists = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} WHERE slug = %s", 'default' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		if ( null !== $exists ) {
-			return;
+			return true;
 		}
 
-		$now = Clock::mysql();
-		$wpdb->insert(
+		$now      = Clock::mysql();
+		$inserted = $wpdb->insert(
 			$table,
 			array(
 				'id'         => 1,
@@ -77,5 +92,7 @@ final class Installer {
 				'slug'       => 'default',
 			)
 		);
+
+		return false !== $inserted;
 	}
 }

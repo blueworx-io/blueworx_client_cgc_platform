@@ -27,7 +27,7 @@ final class AuditLogger {
 	 * @param array<array-key, mixed>|null $before State before the change.
 	 * @param array<array-key, mixed>|null $after  State after the change.
 	 * @param int                          $tenant_id   Tenant.
-	 * @return int|false New row id, or false when the reason is empty or the insert failed.
+	 * @return int|false New row id, or false when the reason is empty the snapshots cannot be encoded as JSON, or the insert failed.
 	 */
 	public static function log(
 		string $action,
@@ -44,6 +44,12 @@ final class AuditLogger {
 			return false;
 		}
 
+		$before_json = null === $before ? null : wp_json_encode( $before );
+		$after_json  = null === $after ? null : wp_json_encode( $after );
+		if ( false === $before_json || false === $after_json ) {
+			return false;
+		}
+
 		$now      = Clock::mysql();
 		$ip       = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( (string) $_SERVER['REMOTE_ADDR'] ) ) : '';
 		$inserted = $wpdb->insert(
@@ -57,8 +63,8 @@ final class AuditLogger {
 				'action'        => $action,
 				'entity_type'   => $entity_type,
 				'entity_id'     => $entity_id,
-				'before_json'   => null === $before ? null : wp_json_encode( $before ),
-				'after_json'    => null === $after ? null : wp_json_encode( $after ),
+				'before_json'   => $before_json,
+				'after_json'    => $after_json,
 				'reason'        => $reason,
 				'ip'            => $ip,
 			)

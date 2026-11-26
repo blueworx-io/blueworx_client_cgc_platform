@@ -17,6 +17,11 @@ use CGC\Championship\Infrastructure\Installer;
 use CGC\Championship\Infrastructure\Roles;
 use CGC\Championship\Infrastructure\Schema;
 
+if ( 'cli' !== PHP_SAPI ) {
+	http_response_code( 403 );
+	exit( 1 );
+}
+
 $cgc_wp = $argv[1] ?? '';
 if ( ! is_file( $cgc_wp . '/wp-load.php' ) ) {
 	fwrite( STDERR, "Usage: php activation-check.php <path-to-wordpress>\n" );
@@ -34,13 +39,39 @@ set_error_handler(
 $_SERVER['HTTP_HOST']   = '127.0.0.1';
 $_SERVER['REQUEST_URI'] = '/';
 require $cgc_wp . '/wp-load.php';
+require_once ABSPATH . 'wp-admin/includes/plugin.php';
 
 global $wpdb;
 $cgc_failures = array();
 
-// Run twice: the second run must change nothing and raise nothing.
-Installer::install();
-Installer::install();
+// Activate through WordPress twice (deactivate in between), so the real activation hook runs.
+$cgc_plugin = '';
+foreach ( get_plugins() as $cgc_file => $cgc_data ) {
+	if ( 'CGC Championship' === $cgc_data['Name'] ) {
+		$cgc_plugin = $cgc_file;
+	}
+}
+if ( '' === $cgc_plugin ) {
+	fwrite(
+		STDERR,
+		'FAILED: plugin not found in the plugins folder
+'
+	);
+	exit( 1 );
+}
+for ( $cgc_i = 0; $cgc_i < 2; $cgc_i++ ) {
+	deactivate_plugins( $cgc_plugin );
+	$cgc_result = activate_plugin( $cgc_plugin );
+	if ( is_wp_error( $cgc_result ) ) {
+		$cgc_failures[] = 'Activation failed: ' . $cgc_result->get_error_message();
+	}
+}
+if ( ! is_plugin_active( $cgc_plugin ) ) {
+	$cgc_failures[] = 'Plugin is not active after activation';
+}
+if ( ! class_exists( Installer::class ) ) {
+	require_once WP_PLUGIN_DIR . '/' . $cgc_plugin;
+}
 
 foreach ( Schema::definitions() as $short => $def ) {
 	$table = Schema::table( $short );
@@ -98,4 +129,4 @@ if ( array() !== $cgc_failures ) {
 	fwrite( STDERR, "FAILED:\n - " . implode( "\n - ", $cgc_failures ) . "\n" );
 	exit( 1 );
 }
-echo 'OK: ' . count( Schema::definitions() ) . " tables, roles, tenant, no notices (installed twice).\n";
+echo 'OK: ' . count( Schema::definitions() ) . " tables, roles, tenant, no notices (activated twice).\n";
