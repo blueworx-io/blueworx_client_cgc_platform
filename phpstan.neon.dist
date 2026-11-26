@@ -1,0 +1,16 @@
+parameters:
+    level: 6
+    paths:
+        - src
+        - cgc-championship.php
+    scanFiles:
+        - vendor/woocommerce/action-scheduler/action-scheduler.php
+    excludePaths:
+        - vendor
+    bootstrapFiles:
+        - tests/phpstan-bootstrap.php
+    ignoreErrors:
+        # CGC_DEMO_MODE defaults to false in the main file but wp-config.php may set it to true.
+        -
+            message: '#always (false|evaluate to false)#'
+            path: src/DemoMode.php
