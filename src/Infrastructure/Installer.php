@@ -52,17 +52,32 @@ final class Installer {
 
 		Roles::sync();
 
-		foreach ( Schema::table_names() as $short ) {
-			$table = Schema::table( $short );
-			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
-				return false;
-			}
-		}
-		if ( ! self::ensure_default_tenant() ) {
+		if ( ! self::schema_is_complete() || ! self::ensure_default_tenant() ) {
 			return false;
 		}
 
 		update_option( self::DB_VERSION_OPTION, CGC_DB_VERSION );
+		return true;
+	}
+
+	/**
+	 * Whether every table has all its columns and indexes (dbDelta fails quietly).
+	 */
+	private static function schema_is_complete(): bool {
+		global $wpdb;
+
+		foreach ( Schema::table_names() as $short ) {
+			$table = Schema::table( $short );
+			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) !== $table ) {
+				return false;
+			}
+			$columns = $wpdb->get_col( "SHOW COLUMNS FROM {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$indexes = $wpdb->get_col( "SHOW INDEX FROM {$table}", 2 ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( array() !== array_diff( Schema::expected_columns( $short ), $columns )
+				|| array() !== array_diff( Schema::expected_indexes( $short ), $indexes ) ) {
+				return false;
+			}
+		}
 		return true;
 	}
 

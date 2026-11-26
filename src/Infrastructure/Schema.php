@@ -479,6 +479,35 @@ final class Schema {
 	}
 
 	/**
+	 * Every column name a table must have, including the common ones.
+	 *
+	 * @param string $short Short table name.
+	 * @return list<string>
+	 */
+	public static function expected_columns( string $short ): array {
+		return array_merge(
+			array( 'id', 'tenant_id', 'created_at', 'updated_at', 'is_demo' ),
+			array_keys( self::definitions()[ $short ]['cols'] )
+		);
+	}
+
+	/**
+	 * Every index name a table must have.
+	 *
+	 * @param string $short Short table name.
+	 * @return list<string>
+	 */
+	public static function expected_indexes( string $short ): array {
+		$names = array( 'PRIMARY', 'tenant_id' );
+		foreach ( self::definitions()[ $short ]['keys'] as $key ) {
+			if ( 1 === preg_match( '/KEY (w+) /', $key, $m ) ) {
+				$names[] = $m[1];
+			}
+		}
+		return $names;
+	}
+
+	/**
 	 * Expands a short type to SQL.
 	 *
 	 * @param string $type Short type or raw SQL.

@@ -37,22 +37,26 @@ function git(root, args) {
 
 export function check(root, base = null) {
   const errors = [];
-  const file = join(root, MAIN_FILE);
-  if (!existsSync(file)) return [`${MAIN_FILE} not found`];
-
   // Hook mode compares what is staged (Git's snapshot), not the files on disk.
   const stagedFiles = base ? null : git(root, ['diff', '--cached', '--name-only']);
   const hookMode = !base && stagedFiles !== null && stagedFiles.trim() !== '';
-  const read = (name) => (hookMode ? git(root, ['show', `:${name}`]) : null) ?? (existsSync(join(root, name)) ? readFileSync(join(root, name), 'utf8') : null);
+  // In hook mode only Git's snapshot counts: a file missing there is missing from the commit.
+  const read = (name) => {
+    if (hookMode) return git(root, ['show', `:${name}`]);
+    return existsSync(join(root, name)) ? readFileSync(join(root, name), 'utf8') : null;
+  };
 
   const current = read(MAIN_FILE);
+  if (current === null) return [`${MAIN_FILE} not found${hookMode ? ' in the commit' : ''}`];
   const header = headerVersion(current);
   const constant = constantVersion(current);
   if (!header) errors.push('Version header not found in plugin file.');
   if (header !== constant) errors.push(`Version header (${header}) and CGC_VERSION (${constant}) differ.`);
 
   const pkgText = read('package.json');
-  if (pkgText !== null) {
+  if (pkgText === null) {
+    errors.push(`package.json not found${hookMode ? ' in the commit' : ''}.`);
+  } else {
     const pkg = JSON.parse(pkgText).version;
     if (pkg !== header) errors.push(`package.json version (${pkg}) differs from the plugin header (${header}).`);
   }

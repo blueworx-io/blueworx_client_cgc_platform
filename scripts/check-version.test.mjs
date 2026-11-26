@@ -86,3 +86,15 @@ test('a missing base ref is an error', () => {
   assert.match(check(r.dir, 'origin/nope').join(' '), /does not exist/);
   rmSync(r.dir, { recursive: true, force: true });
 });
+
+test('staged deletion of package.json is blocked even if the file is on disk', () => {
+  const r = repo();
+  r.write('0.1.0');
+  r.g('add', '-A');
+  r.g('commit', '-q', '-m', 'one');
+  writeFileSync(join(r.dir, 'cgc-championship.php'), plugin('0.1.1'));
+  r.g('add', 'cgc-championship.php');
+  r.g('rm', '-q', '--cached', 'package.json');
+  assert.match(check(r.dir).join(' '), /package.json not found/);
+  rmSync(r.dir, { recursive: true, force: true });
+});

@@ -59,11 +59,18 @@ if ( '' === $cgc_plugin ) {
 	);
 	exit( 1 );
 }
+$cgc_network = is_multisite() && is_plugin_active_for_network( $cgc_plugin );
 for ( $cgc_i = 0; $cgc_i < 2; $cgc_i++ ) {
-	deactivate_plugins( $cgc_plugin );
-	$cgc_result = activate_plugin( $cgc_plugin );
+	deactivate_plugins( $cgc_plugin, false, $cgc_network );
+	// Undo what activation sets up, so only the real activation hook can put it back.
+	delete_option( 'cgc_db_version' );
+	remove_role( 'cgc_player' );
+	$cgc_result = activate_plugin( $cgc_plugin, '', $cgc_network );
 	if ( is_wp_error( $cgc_result ) ) {
 		$cgc_failures[] = 'Activation failed: ' . $cgc_result->get_error_message();
+	}
+	if ( false === get_option( 'cgc_db_version' ) || null === get_role( 'cgc_player' ) ) {
+		$cgc_failures[] = 'The activation hook did not run the installer';
 	}
 }
 if ( ! is_plugin_active( $cgc_plugin ) ) {
