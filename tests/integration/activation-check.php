@@ -82,7 +82,7 @@ if ( ! class_exists( Installer::class ) ) {
 
 foreach ( Schema::definitions() as $short => $def ) {
 	$table = Schema::table( $short );
-	if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
+	if ( strtolower( (string) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) ) !== strtolower( $table ) ) {
 		$cgc_failures[] = "Missing table $table";
 		continue;
 	}

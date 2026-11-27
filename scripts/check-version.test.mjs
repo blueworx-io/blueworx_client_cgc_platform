@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { check } from './check-version.mjs';
+import { check, compareVersions } from './check-version.mjs';
 
 // Scratch repos live in .tmp/ (git-ignored) inside this folder.
 mkdirSync('.tmp', { recursive: true });
@@ -56,6 +56,12 @@ test('a version going down is blocked', () => {
   r.g('add', '-A');
   assert.match(check(r.dir).join(' '), /went down/);
   rmSync(r.dir, { recursive: true, force: true });
+});
+
+test('a prerelease is lower than its release', () => {
+  assert.equal(compareVersions('0.1.2-rc.1', '0.1.2'), -1);
+  assert.equal(compareVersions('0.1.2', '0.1.2-rc.1'), 1);
+  assert.equal(compareVersions('0.1.10', '0.1.9'), 1);
 });
 
 test('header, constant and package.json must agree', () => {

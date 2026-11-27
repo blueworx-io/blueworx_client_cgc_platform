@@ -26,7 +26,6 @@ final class Installer {
 		if ( self::install() ) {
 			return;
 		}
-		deactivate_plugins( plugin_basename( CGC_PLUGIN_FILE ) );
 		wp_die(
 			esc_html__( 'CGC Championship could not set up its database tables, so it was not activated. Check that the database user can create tables, then try again.', 'cgc' ),
 			'',

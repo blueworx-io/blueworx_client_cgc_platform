@@ -28,13 +28,21 @@ export function constantVersion(php) {
 }
 
 export function compareVersions(a, b) {
-  const pa = a.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
-  const pb = b.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+  const split = (v) => {
+    const [core, ...pre] = v.split('-');
+    return { nums: core.split('.').map((n) => parseInt(n, 10) || 0), pre: pre.join('-') };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < Math.max(x.nums.length, y.nums.length); i++) {
+    const d = (x.nums[i] ?? 0) - (y.nums[i] ?? 0);
     if (d !== 0) return d < 0 ? -1 : 1;
   }
-  return 0;
+  // A prerelease is lower than the release it leads up to.
+  if (x.pre === y.pre) return 0;
+  if (x.pre === '') return 1;
+  if (y.pre === '') return -1;
+  return x.pre < y.pre ? -1 : 1;
 }
 
 function git(root, args) {

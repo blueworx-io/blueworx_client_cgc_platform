@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- Database version raised so existing sites recheck their indexes.
+- A failed activation no longer switches the plugin off on a site where it was already active.
+- The version check treats a prerelease as lower than its release.
+
 ## 0.1.2
 
 - Install now checks every custom index, stops activation with a clear error if setup fails, and no longer depends on table-name case.
