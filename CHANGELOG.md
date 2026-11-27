@@ -6,6 +6,7 @@
 - A failed "can this table roll back?" check now stops the write instead of allowing it. The plugin asks which database class WordPress really uses (the SQLite drop-in's marker is also defined on MySQL sites), so these checks are never skipped on MySQL. A commit on a new connection (WordPress reconnected mid-save) counts as a failure.
 - Upgrades convert any MyISAM plugin table to InnoDB and remove duplicate lineup snapshots (keeping the newest) before the unique key is added. Each delete only works while its audit row exists, and the step stops if the connection changed. The database version is now 5 so existing sites run this once.
 - While a match lock or a database transaction is open, WordPress is stopped from quietly reconnecting and re-running a write on a new connection (that write would be saved outside the transaction). The connection is checked when the transaction starts and before and after the commit, and any change counts as a failed save. Each duplicate delete in the upgrade is tied to its own audit row.
+- If the database server refuses the lock query (for example a Galera or Percona cluster, which does not allow GET_LOCK), saving a lineup now says so plainly and writes nothing, instead of the misleading "another change is in progress". A real wait that ran out still says that.
 - A team penalty tie is now decided on the rounded shots each player receives (first listed pays on a tie).
 
 ## 0.2.2

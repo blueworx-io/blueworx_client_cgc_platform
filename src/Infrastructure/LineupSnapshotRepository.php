@@ -142,6 +142,9 @@ final class LineupSnapshotRepository {
 	private static function locked( int $match_id, int $tenant_id, callable $work ): mixed {
 		$lock = 'cgc_lineup_' . $tenant_id . '_' . $match_id;
 		if ( ! Db::lock( $lock ) ) {
+			if ( Db::lock_unavailable() ) {
+				return new WP_Error( 'cgc_lock_unavailable', __( 'The database server does not allow the lock this save needs (GET_LOCK), which clustered databases such as Galera can do. Nothing was saved. Ask the host about it; trying again will not help.', 'cgc' ) );
+			}
 			return new WP_Error( 'cgc_busy', __( 'Another change to this match is in progress. Try again in a moment.', 'cgc' ) );
 		}
 		try {

@@ -43,6 +43,13 @@ final class Db {
 	private static bool $open = false;
 
 	/**
+	 * Whether the last lock() failed because the server refused or failed the lock query.
+	 *
+	 * @var bool
+	 */
+	private static bool $lock_error = false;
+
+	/**
 	 * Whether WordPress is really talking to SQLite (the test database) instead of MySQL or MariaDB.
 	 * The SQLite drop-in file defines its marker constant even on a site set to MySQL, so this asks
 	 * which database class is in use.
@@ -277,16 +284,32 @@ final class Db {
 		if ( self::is_sqlite() ) {
 			return true;
 		}
+		self::$lock_error = false;
 		// A lock belongs to one connection, so no silent reconnecting while we hold it.
 		if ( ! self::enter() ) {
 			return false;
 		}
-		$got = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', self::lock_name( $name ), $seconds ) );
+		// Quiet, because a server that refuses locks would otherwise print its error on the page.
+		$suppress = $wpdb->suppress_errors( true );
+		$got      = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', self::lock_name( $name ), $seconds ) );
+		$failed   = self::last_query_failed();
+		$wpdb->suppress_errors( $suppress );
+		self::$lock_error = $failed || null === $got;
 		if ( '1' !== (string) $got ) {
 			self::leave();
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * Whether the last failed lock() was the server refusing or failing the lock query, not another
+	 * request holding the lock. GET_LOCK answers 0 when the wait ran out, but gives an error (or NULL)
+	 * where it is not allowed, for example on Galera or Percona XtraDB clusters. Waiting longer never
+	 * helps in that case.
+	 */
+	public static function lock_unavailable(): bool {
+		return self::$lock_error;
 	}
 
 	/**
