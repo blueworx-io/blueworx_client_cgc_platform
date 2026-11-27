@@ -1,0 +1,19 @@
+{
+  "name": "cgc-championship",
+  "version": "0.1.6",
+  "private": true,
+  "description": "CGC Championship WordPress plugin (front-end bundles).",
+  "scripts": {
+    "build": "wp-scripts build --webpack-src-dir=assets/src",
+    "start": "wp-scripts start --webpack-src-dir=assets/src",
+    "test:version": "node --test scripts/check-version.test.mjs",
+    "check:version": "node scripts/check-version.mjs",
+    "hooks": "git config core.hooksPath .githooks",
+    "lint": "echo \"PHP is linted by PHPCS in the PHPCS step of CI, which installs Composer packages first. Run composer lint locally. No JS lint configured.\"",
+    "test": "playwright test --reporter=list,json"
+  },
+  "devDependencies": {
+    "@wordpress/scripts": "^30.0.0",
+    "@playwright/test": "^1.49.0"
+  }
+}

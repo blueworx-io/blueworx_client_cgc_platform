@@ -1,0 +1,7 @@
+{
+  "dependencies": {},
+  "devDependencies": {
+    "@wordpress/scripts": "*",
+    "@playwright/test": "^1.49.0"
+  }
+}

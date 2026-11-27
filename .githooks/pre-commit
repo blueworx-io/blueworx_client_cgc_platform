@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks a commit that does not bump the plugin version.
+# Turn on once per clone: npm run hooks   (git config core.hooksPath .githooks)
+exec node scripts/check-version.mjs
