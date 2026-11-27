@@ -32,7 +32,7 @@ final class DbTest extends TestCase {
 		foreach ( array(
 			'guards'     => 0,
 			'open'       => false,
-			'lock_error' => false,
+			'lock_error' => '',
 			'connection' => null,
 		) as $name => $value ) {
 			( new \ReflectionProperty( Db::class, $name ) )->setValue( null, $value );
@@ -113,23 +113,23 @@ final class DbTest extends TestCase {
 		$busy->when( '/GET_LOCK/', '0' );
 		$GLOBALS['wpdb'] = $busy; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		$this->assertFalse( Db::lock( 'x' ) );
-		$this->assertFalse( Db::lock_unavailable(), 'A wait that ran out is just busy.' );
+		$this->assertSame( '', Db::lock_failure(), 'A wait that ran out is just busy.' );
 
 		$cluster = new FakeWpdb();
 		$cluster->when( '/GET_LOCK/', null, true );
 		$GLOBALS['wpdb'] = $cluster; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		$this->assertFalse( Db::lock( 'x' ) );
-		$this->assertTrue( Db::lock_unavailable(), 'An error from GET_LOCK (for example on Galera) is not a wait.' );
+		$this->assertSame( 'simulated failure', Db::lock_failure(), "The server's own message is kept." );
 
 		$null = new FakeWpdb();
 		$null->when( '/GET_LOCK/', null );
 		$GLOBALS['wpdb'] = $null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		$this->assertFalse( Db::lock( 'x' ) );
-		$this->assertTrue( Db::lock_unavailable(), 'NULL means the lock query could not run.' );
+		$this->assertSame( 'GET_LOCK gave no answer', Db::lock_failure(), 'NULL means the lock query gave no answer.' );
 
 		$GLOBALS['wpdb'] = $busy; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 		Db::lock( 'x' );
-		$this->assertFalse( Db::lock_unavailable(), 'The answer is for the last attempt only.' );
+		$this->assertSame( '', Db::lock_failure(), 'The answer is for the last attempt only.' );
 	}
 
 	public function test_the_sqlite_marker_alone_does_not_skip_the_checks(): void {

@@ -43,11 +43,11 @@ final class Db {
 	private static bool $open = false;
 
 	/**
-	 * Whether the last lock() failed because the server refused or failed the lock query.
+	 * The server's message when the last lock() failed because the lock query itself failed (empty otherwise).
 	 *
-	 * @var bool
+	 * @var string
 	 */
-	private static bool $lock_error = false;
+	private static string $lock_error = '';
 
 	/**
 	 * Whether WordPress is really talking to SQLite (the test database) instead of MySQL or MariaDB.
@@ -284,17 +284,19 @@ final class Db {
 		if ( self::is_sqlite() ) {
 			return true;
 		}
-		self::$lock_error = false;
+		self::$lock_error = '';
 		// A lock belongs to one connection, so no silent reconnecting while we hold it.
 		if ( ! self::enter() ) {
+			self::$lock_error = 'Could not switch off reconnecting';
 			return false;
 		}
 		// Quiet, because a server that refuses locks would otherwise print its error on the page.
 		$suppress = $wpdb->suppress_errors( true );
 		$got      = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', self::lock_name( $name ), $seconds ) );
 		$failed   = self::last_query_failed();
+		$reason   = $failed ? (string) $wpdb->last_error : '';
 		$wpdb->suppress_errors( $suppress );
-		self::$lock_error = $failed || null === $got;
+		self::$lock_error = ( $failed || null === $got ) ? ( '' !== $reason ? $reason : 'GET_LOCK gave no answer' ) : '';
 		if ( '1' !== (string) $got ) {
 			self::leave();
 			return false;
@@ -303,12 +305,12 @@ final class Db {
 	}
 
 	/**
-	 * Whether the last failed lock() was the server refusing or failing the lock query, not another
-	 * request holding the lock. GET_LOCK answers 0 when the wait ran out, but gives an error (or NULL)
-	 * where it is not allowed, for example on Galera or Percona XtraDB clusters. Waiting longer never
-	 * helps in that case.
+	 * Why the last lock() failed, when the lock query itself failed: the server's own message. Empty
+	 * when the lock was taken or another request held it (GET_LOCK answers 0 after the wait). The
+	 * cause can be passing (a dropped connection) or lasting (a Galera or Percona cluster refuses
+	 * GET_LOCK), so callers must not claim which.
 	 */
-	public static function lock_unavailable(): bool {
+	public static function lock_failure(): string {
 		return self::$lock_error;
 	}
 
