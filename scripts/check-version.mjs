@@ -27,6 +27,16 @@ export function constantVersion(php) {
   return m ? m[1] : null;
 }
 
+export function compareVersions(a, b) {
+  const pa = a.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  const pb = b.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
 function git(root, args) {
   try {
     return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -74,7 +84,10 @@ export function check(root, base = null) {
     return errors; // nothing to commit.
   }
 
-  if (before !== null && header === headerVersion(before)) {
+  const prev = before === null ? null : headerVersion(before);
+  if (prev && header && compareVersions(header, prev) < 0) {
+    errors.push(`Version went down (${prev} to ${header}). Raise it instead.`);
+  } else if (before !== null && header === prev) {
     errors.push(`Version was not bumped (still ${header}). Raise Version and CGC_VERSION in ${MAIN_FILE} and package.json.`);
   }
   return errors;

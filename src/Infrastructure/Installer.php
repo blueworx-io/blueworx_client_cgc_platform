@@ -23,7 +23,15 @@ final class Installer {
 	 * Activation hook.
 	 */
 	public static function activate(): void {
-		self::install();
+		if ( self::install() ) {
+			return;
+		}
+		deactivate_plugins( plugin_basename( CGC_PLUGIN_FILE ) );
+		wp_die(
+			esc_html__( 'CGC Championship could not set up its database tables, so it was not activated. Check that the database user can create tables, then try again.', 'cgc-championship' ),
+			'',
+			array( 'back_link' => true )
+		);
 	}
 
 	/**
@@ -68,10 +76,13 @@ final class Installer {
 
 		foreach ( Schema::table_names() as $short ) {
 			$table = Schema::table( $short );
-			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) !== $table ) {
+			// Query the table instead of comparing names: some servers lowercase them.
+			$suppress = $wpdb->suppress_errors( true );
+			$columns  = $wpdb->get_col( "SHOW COLUMNS FROM {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->suppress_errors( $suppress );
+			if ( ! is_array( $columns ) || array() === $columns ) {
 				return false;
 			}
-			$columns = $wpdb->get_col( "SHOW COLUMNS FROM {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			$indexes = $wpdb->get_col( "SHOW INDEX FROM {$table}", 2 ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			if ( array() !== array_diff( Schema::expected_columns( $short ), $columns )
 				|| array() !== array_diff( Schema::expected_indexes( $short ), $indexes ) ) {

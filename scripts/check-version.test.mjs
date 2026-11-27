@@ -47,6 +47,17 @@ test('commit without a bump is blocked, with a bump passes', () => {
   rmSync(r.dir, { recursive: true, force: true });
 });
 
+test('a version going down is blocked', () => {
+  const r = repo();
+  r.write('0.1.1');
+  r.g('add', '-A');
+  r.g('commit', '-q', '-m', 'one');
+  r.write('0.1.0', '// change\n');
+  r.g('add', '-A');
+  assert.match(check(r.dir).join(' '), /went down/);
+  rmSync(r.dir, { recursive: true, force: true });
+});
+
 test('header, constant and package.json must agree', () => {
   const r = repo();
   writeFileSync(join(r.dir, 'cgc-championship.php'), plugin('0.1.0').replace("CGC_VERSION = '0.1.0'", "CGC_VERSION = '0.2.0'"));

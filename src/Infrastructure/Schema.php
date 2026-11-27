@@ -500,7 +500,7 @@ final class Schema {
 	public static function expected_indexes( string $short ): array {
 		$names = array( 'PRIMARY', 'tenant_id' );
 		foreach ( self::definitions()[ $short ]['keys'] as $key ) {
-			if ( 1 === preg_match( '/KEY (w+) /', $key, $m ) ) {
+			if ( 1 === preg_match( '/KEY (\w+) /', $key, $m ) ) {
 				$names[] = $m[1];
 			}
 		}

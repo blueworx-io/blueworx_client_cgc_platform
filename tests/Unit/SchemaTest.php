@@ -65,6 +65,18 @@ final class SchemaTest extends TestCase {
 		}
 	}
 
+	public function test_expected_indexes_include_the_custom_keys(): void {
+		foreach ( Schema::table_names() as $short ) {
+			$sql = Schema::create_sql( $short, 'wp_cgc_', 'DEFAULT CHARSET=utf8mb4' );
+			preg_match_all( '/KEY (\w+) \(/', $sql, $m );
+			$indexes = Schema::expected_indexes( $short );
+			foreach ( $m[1] as $name ) {
+				$this->assertContains( $name, $indexes, "$short must require index $name" );
+			}
+		}
+		$this->assertContains( 'one_active_team', Schema::expected_indexes( 'team_members' ) );
+	}
+
 	public function test_key_indexes_from_the_brief_exist(): void {
 		$expected = array(
 			'matches'        => 'KEY status_deadline (status, deadline_at)',

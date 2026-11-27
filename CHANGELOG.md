@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Install now checks every custom index, stops activation with a clear error if setup fails, and no longer depends on table-name case.
+- The version check now rejects a version that goes down.
+
 ## 0.1.1
 
 - Added the standard BlueWorx WordPress CI workflow (needs Luke to add it) and a Vercel config so Vercel no longer builds this repo.
