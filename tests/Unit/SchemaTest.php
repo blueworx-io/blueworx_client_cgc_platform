@@ -77,6 +77,37 @@ final class SchemaTest extends TestCase {
 		$this->assertContains( 'one_active_team', Schema::expected_indexes( 'team_members' ) );
 	}
 
+	public function test_index_mismatches_catch_wrong_columns_and_uniqueness(): void {
+		$rows = array();
+		foreach ( Schema::expected_index_definitions( 'team_members' ) as $name => $def ) {
+			foreach ( $def['columns'] as $i => $column ) {
+				$rows[] = array(
+					'Key_name'     => $name,
+					'Non_unique'   => $def['unique'] ? 0 : 1,
+					'Seq_in_index' => $i + 1,
+					'Column_name'  => $column,
+				);
+			}
+		}
+		$this->assertSame( array(), Schema::index_mismatches( $rows, 'team_members' ) );
+
+		$not_unique = $rows;
+		foreach ( $not_unique as $i => $row ) {
+			if ( 'one_active_team' === $row['Key_name'] ) {
+				$not_unique[ $i ]['Non_unique'] = 1;
+			}
+		}
+		$this->assertSame( array( 'one_active_team' ), Schema::index_mismatches( $not_unique, 'team_members' ) );
+
+		$wrong_column = $rows;
+		foreach ( $wrong_column as $i => $row ) {
+			if ( 'one_active_team' === $row['Key_name'] ) {
+				$wrong_column[ $i ]['Column_name'] = 'id';
+			}
+		}
+		$this->assertSame( array( 'one_active_team' ), Schema::index_mismatches( $wrong_column, 'team_members' ) );
+	}
+
 	public function test_key_indexes_from_the_brief_exist(): void {
 		$expected = array(
 			'matches'        => 'KEY status_deadline (status, deadline_at)',

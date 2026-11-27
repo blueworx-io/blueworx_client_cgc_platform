@@ -62,6 +62,9 @@ test('a prerelease is lower than its release', () => {
   assert.equal(compareVersions('0.1.2-rc.1', '0.1.2'), -1);
   assert.equal(compareVersions('0.1.2', '0.1.2-rc.1'), 1);
   assert.equal(compareVersions('0.1.10', '0.1.9'), 1);
+  assert.equal(compareVersions('0.1.4+rebuild', '0.1.4'), -1);
+  assert.equal(compareVersions('0.1.4-rc.2', '0.1.4-rc.10'), -1);
+  assert.equal(compareVersions('0.1.4-beta', '0.1.4-rc.1'), -1);
 });
 
 test('header, constant and package.json must agree', () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Index checks now compare columns and uniqueness; failed database setup retries every 5 minutes with an admin notice.
+- Version check follows WordPress version ordering.
+- Lint script no longer needs Composer packages; browser tests install them when missing.
+
 ## 0.1.4
 
 - Added a lint script and browser tests that check activation, the database tables and their indexes, and repeat activation.

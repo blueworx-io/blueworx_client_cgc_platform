@@ -21,5 +21,6 @@ final class Plugin {
 	 */
 	public static function boot(): void {
 		Installer::maybe_upgrade();
+		add_action( 'admin_notices', array( Installer::class, 'failure_notice' ) );
 	}
 }

@@ -1,7 +1,16 @@
-// Writes a test-only mu-plugin into the disposable test site (.wp-test, never shipped).
-// It lets a test read back what the plugin's install routine created.
+// Prepares the disposable test site before the specs run:
+// 1. Installs the plugin's Composer packages if they are missing (the check starts the site
+//    before any Composer install), then switches the plugin off and on once so its install
+//    routine runs with the packages present.
+// 2. Writes a test-only mu-plugin into the site's wp-content (never shipped). It lets a test
+//    read back what the plugin's install routine created.
 const fs = require( 'fs' );
 const path = require( 'path' );
+const { execFileSync } = require( 'child_process' );
+const { chromium } = require( '@playwright/test' );
+
+const ROOT = path.join( __dirname, '..', '..' );
+const SLUG = 'cgc-championship';
 
 const MU_PLUGIN = String.raw`<?php
 /**
@@ -19,13 +28,13 @@ add_action( 'init', function () {
 	if ( $out['active'] ) {
 		foreach ( Schema::table_names() as $short ) {
 			$table   = Schema::table( $short );
-			$columns = $wpdb->get_col( "SHOW COLUMNS FROM {$table}" );
-			$indexes = $wpdb->get_col( "SHOW INDEX FROM {$table}", 2 );
+			$columns = (array) $wpdb->get_col( "SHOW COLUMNS FROM {$table}" );
+			$indexes = (array) $wpdb->get_results( "SHOW INDEX FROM {$table}", ARRAY_A );
 			$out['tables'][ $short ] = array(
-				'columns'          => (array) $columns,
-				'indexes'          => (array) $indexes,
-				'missing_columns'  => array_values( array_diff( Schema::expected_columns( $short ), (array) $columns ) ),
-				'missing_indexes'  => array_values( array_diff( Schema::expected_indexes( $short ), (array) $indexes ) ),
+				'columns'         => $columns,
+				'indexes'         => array_values( array_unique( array_column( $indexes, 'Key_name' ) ) ),
+				'missing_columns' => array_values( array_diff( Schema::expected_columns( $short ), $columns ) ),
+				'bad_indexes'     => Schema::index_mismatches( $indexes, $short ),
 			);
 		}
 		foreach ( array( 'cgc_super_admin', 'cgc_tournament_admin', 'cgc_group_manager', 'cgc_player' ) as $role ) {
@@ -38,13 +47,53 @@ add_action( 'init', function () {
 } );
 `;
 
-module.exports = async () => {
-	const wpContent = path.join( __dirname, '..', '..', '.wp-test', 'wp', 'wp-content' );
-	if ( ! fs.existsSync( wpContent ) ) {
-		console.warn( 'global-setup: no .wp-test site found, so the test mu-plugin was not written.' );
-		return;
+function ensureComposerPackages() {
+	if ( fs.existsSync( path.join( ROOT, 'vendor', 'autoload.php' ) ) ) {
+		return false;
 	}
-	const dir = path.join( wpContent, 'mu-plugins' );
+	execFileSync( 'composer', [ 'install', '--no-dev', '--no-interaction', '--no-progress' ], {
+		cwd: ROOT,
+		stdio: 'inherit',
+		shell: process.platform === 'win32',
+	} );
+	return true;
+}
+
+async function cyclePlugin( baseURL ) {
+	const user = process.env.WP_ADMIN_USER || 'admin';
+	const pass = process.env.WP_ADMIN_PASS || 'admin';
+	const browser = await chromium.launch();
+	try {
+		const page = await browser.newPage( { baseURL } );
+		await page.goto( '/wp-login.php', { timeout: 60000 } );
+		await page.fill( '#user_login', user );
+		await page.fill( '#user_pass', pass );
+		await page.click( '#wp-submit' );
+		await page.waitForURL( /wp-admin/, { timeout: 60000 } );
+		await page.goto( '/wp-admin/plugins.php' );
+		const off = page.locator( `#deactivate-${ SLUG }` );
+		if ( await off.count() ) {
+			await off.click();
+		}
+		await page.locator( `#activate-${ SLUG }` ).click();
+		await page.locator( `#deactivate-${ SLUG }` ).waitFor( { timeout: 60000 } );
+	} finally {
+		await browser.close();
+	}
+}
+
+module.exports = async ( config ) => {
+	const contentDir = process.env.CGC_WP_CONTENT_DIR || path.join( ROOT, '.wp-test', 'wp', 'wp-content' );
+	if ( ! fs.existsSync( contentDir ) ) {
+		throw new Error(
+			`The test site's wp-content folder was not found at ${ contentDir }. Start the test site first, or set CGC_WP_CONTENT_DIR.`
+		);
+	}
+	const dir = path.join( contentDir, 'mu-plugins' );
 	fs.mkdirSync( dir, { recursive: true } );
 	fs.writeFileSync( path.join( dir, 'cgc-test-harness.php' ), MU_PLUGIN );
+
+	if ( ensureComposerPackages() ) {
+		await cyclePlugin( config.projects[ 0 ].use.baseURL );
+	}
 };

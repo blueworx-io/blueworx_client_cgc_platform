@@ -27,22 +27,47 @@ export function constantVersion(php) {
   return m ? m[1] : null;
 }
 
-export function compareVersions(a, b) {
-  const split = (v) => {
-    const [core, ...pre] = v.split('-');
-    return { nums: core.split('.').map((n) => parseInt(n, 10) || 0), pre: pre.join('-') };
-  };
-  const x = split(a);
-  const y = split(b);
-  for (let i = 0; i < Math.max(x.nums.length, y.nums.length); i++) {
-    const d = (x.nums[i] ?? 0) - (y.nums[i] ?? 0);
-    if (d !== 0) return d < 0 ? -1 : 1;
+// Same ordering as PHP's version_compare(), which WordPress uses for plugin updates.
+const SPECIAL = { dev: 0, alpha: 1, a: 1, beta: 2, b: 2, RC: 3, rc: 3, '#': 4, pl: 5, p: 5 };
+
+function canonical(v) {
+  return v
+    .replace(/[-_+]/g, '.')
+    .replace(/([0-9])([^0-9.])/g, "$1.$2")
+    .replace(/([^0-9.])([0-9])/g, "$1.$2")
+    .split('.')
+    .filter((p) => p !== '');
+}
+
+function formOrder(part) {
+  for (const [name, order] of Object.entries(SPECIAL)) {
+    if (part.startsWith(name)) return order;
   }
-  // A prerelease is lower than the release it leads up to.
-  if (x.pre === y.pre) return 0;
-  if (x.pre === '') return 1;
-  if (y.pre === '') return -1;
-  return x.pre < y.pre ? -1 : 1;
+  return -6; // unknown text sorts below every known form.
+}
+
+function comparePart(p, q) {
+  const pn = /^[0-9]+$/.test(p);
+  const qn = /^[0-9]+$/.test(q);
+  if (pn && qn) return Math.sign(parseInt(p, 10) - parseInt(q, 10));
+  if (!pn && !qn) return Math.sign(formOrder(p) - formOrder(q));
+  return pn ? Math.sign(formOrder('#') - formOrder(q)) : Math.sign(formOrder(p) - formOrder('#'));
+}
+
+export function compareVersions(a, b) {
+  const x = canonical(a);
+  const y = canonical(b);
+  const len = Math.min(x.length, y.length);
+  for (let i = 0; i < len; i++) {
+    const c = comparePart(x[i], y[i]);
+    if (c !== 0) return c;
+  }
+  if (x.length === y.length) return 0;
+  const longer = x.length > y.length ? x : y;
+  const sign = x.length > y.length ? 1 : -1;
+  const next = longer[len];
+  if (/^[0-9]+$/.test(next)) return sign;
+  return Math.sign(formOrder(next) - formOrder('#')) * sign;
 }
 
 function git(root, args) {

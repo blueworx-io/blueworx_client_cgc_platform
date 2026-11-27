@@ -10,6 +10,7 @@ async function loginAsAdmin( page ) {
 }
 
 // PHP prints these labels when a notice, warning or fatal error reaches the page.
-const PHP_PROBLEM = /(Notice|Warning|Deprecated|Fatal error|Parse error):\s/;
+// Matches both plain text and the HTML-bold form ("<b>Warning</b>:").
+const PHP_PROBLEM = /(Notice|Warning|Deprecated|Fatal error|Parse error)(<\/b>)?:\s/;
 
 module.exports = { loginAsAdmin, PHP_PROBLEM };

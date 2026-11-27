@@ -14,7 +14,8 @@ test.beforeEach( async ( { page } ) => {
 test( 'the plugin is active and the plugins screen shows no PHP notices', async ( { page } ) => {
 	await page.goto( '/wp-admin/plugins.php' );
 	await expect( page.locator( '#deactivate-cgc-championship' ) ).toBeVisible();
-	await expect( page.locator( '#wpbody-content' ) ).not.toContainText( PHP_PROBLEM );
+	// The whole page, not just the content area: startup warnings print before it.
+	expect( await page.content() ).not.toMatch( PHP_PROBLEM );
 	await expect( page.locator( '#wpbody-content' ) ).not.toContainText( 'run "composer install"' );
 } );
 
@@ -31,7 +32,7 @@ test( 'every table exists with its columns and indexes, and the roles exist', as
 			expect( table.columns, `${ name } has ${ col }` ).toContain( col );
 		}
 		expect( table.missing_columns, `${ name } missing columns` ).toEqual( [] );
-		expect( table.missing_indexes, `${ name } missing indexes` ).toEqual( [] );
+		expect( table.bad_indexes, `${ name } wrong or missing indexes` ).toEqual( [] );
 	}
 	for ( const role of Object.keys( schema.roles ) ) {
 		expect( schema.roles[ role ], role ).toBe( true );
@@ -46,7 +47,7 @@ test( 'activating again is safe and changes nothing', async ( { page } ) => {
 	await expect( page.locator( '#activate-cgc-championship' ) ).toBeVisible();
 	await page.click( '#activate-cgc-championship' );
 	await expect( page.locator( '#deactivate-cgc-championship' ) ).toBeVisible();
-	await expect( page.locator( '#wpbody-content' ) ).not.toContainText( PHP_PROBLEM );
+	expect( await page.content() ).not.toMatch( PHP_PROBLEM );
 
 	const after = await readSchema( page );
 	expect( after.tables ).toEqual( before.tables );

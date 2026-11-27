@@ -508,6 +508,68 @@ final class Schema {
 	}
 
 	/**
+	 * Index name => whether it is unique and its ordered columns, for every index a table must have.
+	 *
+	 * @param string $short Short table name.
+	 * @return array<string, array{unique: bool, columns: list<string>}>
+	 */
+	public static function expected_index_definitions( string $short ): array {
+		$defs = array(
+			'PRIMARY'   => array(
+				'unique'  => true,
+				'columns' => array( 'id' ),
+			),
+			'tenant_id' => array(
+				'unique'  => false,
+				'columns' => array( 'tenant_id' ),
+			),
+		);
+		foreach ( self::definitions()[ $short ]['keys'] as $key ) {
+			if ( 1 !== preg_match( '/^(UNIQUE )?KEY (\w+) \((.+)\)$/', trim( $key ), $m ) ) {
+				continue;
+			}
+			$columns = array();
+			foreach ( explode( ',', $m[3] ) as $column ) {
+				$columns[] = trim( (string) preg_replace( '/\(\d+\)$/', '', trim( $column ) ) );
+			}
+			$defs[ $m[2] ] = array(
+				'unique'  => '' !== $m[1],
+				'columns' => $columns,
+			);
+		}
+		return $defs;
+	}
+
+	/**
+	 * Names of expected indexes whose columns or uniqueness differ from the definition.
+	 *
+	 * @param list<array<string, mixed>> $rows  Rows from SHOW INDEX (Key_name, Non_unique, Seq_in_index, Column_name).
+	 * @param string                     $short Short table name.
+	 * @return list<string>
+	 */
+	public static function index_mismatches( array $rows, string $short ): array {
+		$found = array();
+		foreach ( $rows as $row ) {
+			$name                     = (string) ( $row['Key_name'] ?? '' );
+			$found[ $name ]['unique'] = 0 === (int) ( $row['Non_unique'] ?? 1 );
+			$found[ $name ]['columns'][ (int) ( $row['Seq_in_index'] ?? 0 ) ] = strtolower( (string) ( $row['Column_name'] ?? '' ) );
+		}
+		$bad = array();
+		foreach ( self::expected_index_definitions( $short ) as $name => $def ) {
+			if ( ! isset( $found[ $name ] ) ) {
+				$bad[] = $name;
+				continue;
+			}
+			ksort( $found[ $name ]['columns'] );
+			$columns = array_map( 'strtolower', $def['columns'] );
+			if ( $found[ $name ]['unique'] !== $def['unique'] || array_values( $found[ $name ]['columns'] ) !== $columns ) {
+				$bad[] = $name;
+			}
+		}
+		return $bad;
+	}
+
+	/**
 	 * Expands a short type to SQL.
 	 *
 	 * @param string $type Short type or raw SQL.

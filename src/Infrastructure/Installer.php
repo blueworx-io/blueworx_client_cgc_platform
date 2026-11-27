@@ -18,6 +18,8 @@ use CGC\Championship\Clock;
 final class Installer {
 
 	public const DB_VERSION_OPTION = 'cgc_db_version';
+	public const FAILED_TRANSIENT  = 'cgc_install_failed';
+	public const RETRY_SECONDS     = 300;
 
 	/**
 	 * Activation hook.
@@ -37,9 +39,30 @@ final class Installer {
 	 * Runs the install when the stored schema version differs from CGC_DB_VERSION.
 	 */
 	public static function maybe_upgrade(): void {
-		if ( get_option( self::DB_VERSION_OPTION ) !== CGC_DB_VERSION ) {
-			self::install();
+		if ( get_option( self::DB_VERSION_OPTION ) === CGC_DB_VERSION ) {
+			return;
 		}
+		// After a failure, wait before trying again so a broken database is not hit on every page load.
+		if ( false !== get_transient( self::FAILED_TRANSIENT ) ) {
+			return;
+		}
+		if ( self::install() ) {
+			delete_transient( self::FAILED_TRANSIENT );
+			return;
+		}
+		set_transient( self::FAILED_TRANSIENT, 1, self::RETRY_SECONDS );
+	}
+
+	/**
+	 * Tells administrators when the last database setup failed.
+	 */
+	public static function failure_notice(): void {
+		if ( false === get_transient( self::FAILED_TRANSIENT ) || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		echo '<div class="notice notice-error"><p>'
+			. esc_html__( 'CGC Championship could not finish its database setup. Check that the database user can create and alter tables. It will try again in a few minutes.', 'cgc' )
+			. '</p></div>';
 	}
 
 	/**
@@ -82,9 +105,10 @@ final class Installer {
 			if ( ! is_array( $columns ) || array() === $columns ) {
 				return false;
 			}
-			$indexes = $wpdb->get_col( "SHOW INDEX FROM {$table}", 2 ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$indexes = $wpdb->get_results( "SHOW INDEX FROM {$table}", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 			if ( array() !== array_diff( Schema::expected_columns( $short ), $columns )
-				|| array() !== array_diff( Schema::expected_indexes( $short ), $indexes ) ) {
+				|| ! is_array( $indexes )
+				|| array() !== Schema::index_mismatches( $indexes, $short ) ) {
 				return false;
 			}
 		}
