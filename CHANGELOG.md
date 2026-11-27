@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Added a lint script and browser tests that check activation, the database tables and their indexes, and repeat activation.
+
 ## 0.1.3
 
 - Database version raised so existing sites recheck their indexes.
