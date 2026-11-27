@@ -143,16 +143,20 @@ final class MigrationsTest extends TestCase {
 	}
 
 	public function test_nothing_is_deleted_after_the_connection_changes(): void {
-		$calls = 0;
-		$this->db->when(
-			'/CONNECTION_ID/',
-			static function () use ( &$calls ): string {
-				return 1 === ++$calls ? '10' : '11';
-			}
-		);
 		$this->with_duplicates( array( '9', '7' ) );
+		$this->db->connection_ids( array( '10', '10', '11' ) ); // Changes after the audit row was written.
 
 		$this->assertFalse( Migrations::remove_duplicate_snapshots() );
 		$this->assertSame( array(), $this->db->matching( '/^DELETE FROM/' ) );
+	}
+
+	public function test_each_delete_is_tied_to_its_own_audit_row(): void {
+		// An audit row from an earlier, aborted attempt must not let a later delete through.
+		$this->with_duplicates( array( '9', '7', '4' ) );
+		$this->assertTrue( Migrations::remove_duplicate_snapshots() );
+
+		$deletes = $this->db->matching( '/^DELETE FROM/' );
+		$this->assertMatchesRegularExpression( '/wp_cgc_audit_log` WHERE id = 1 AND/', $deletes[0] );
+		$this->assertMatchesRegularExpression( '/wp_cgc_audit_log` WHERE id = 2 AND/', $deletes[1] );
 	}
 }

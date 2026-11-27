@@ -28,6 +28,14 @@ final class DbTest extends TestCase {
 	private FakeWpdb $db;
 
 	protected function setUp(): void {
+		// Db keeps its guard count in static properties, so one test cannot leave a lock open for the next.
+		foreach ( array(
+			'guards'     => 0,
+			'open'       => false,
+			'connection' => null,
+		) as $name => $value ) {
+			( new \ReflectionProperty( Db::class, $name ) )->setValue( null, $value );
+		}
 		$this->db        = new FakeWpdb();
 		$GLOBALS['wpdb'] = $this->db; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
 	}
@@ -159,18 +167,63 @@ final class DbTest extends TestCase {
 	}
 
 	public function test_a_commit_on_a_new_connection_is_a_failure(): void {
-		$calls = 0;
-		$this->db->all_innodb()->when(
-			'/CONNECTION_ID/',
-			static function () use ( &$calls ): string {
-				return 1 === ++$calls ? '10' : '11'; // WordPress reconnected after the transaction started.
-			}
-		);
+		// WordPress reconnected after the transaction started.
+		$this->db->all_innodb()->connection_ids( array( '10', '10', '11' ) );
 		$this->assertTrue( Db::begin( array( 'match_lineups', 'audit_log' ) ) );
 		$this->assertFalse( Db::commit() );
 		$this->assertNotNull( $this->db->position( '/^ROLLBACK/' ) );
+		$this->assertSame( 5, $this->db->reconnect_retries );
 	}
 
+	public function test_a_commit_that_was_run_again_on_a_new_connection_is_a_failure(): void {
+		// The connection is the same before COMMIT and different after it: COMMIT ran on a fresh connection.
+		$this->db->all_innodb()->connection_ids( array( '10', '10', '10', '11' ) );
+		$this->assertTrue( Db::begin( array( 'match_lineups', 'audit_log' ) ) );
+		$this->assertFalse( Db::commit() );
+	}
+
+	public function test_a_transaction_that_started_on_a_new_connection_is_refused(): void {
+		// The connection changed while START TRANSACTION ran, so the transaction is not on the connection we know.
+		$this->db->all_innodb()->connection_ids( array( '10', '11' ) );
+		$this->assertFalse( Db::begin( array( 'match_lineups', 'audit_log' ) ) );
+		$this->assertSame( 5, $this->db->reconnect_retries, 'WordPress reconnecting is put back.' );
+	}
+
+	public function test_wordpress_does_not_reconnect_while_a_lock_or_transaction_is_open(): void {
+		$seen = array();
+		$db   = $this->db;
+		$this->db->all_innodb()->when( '/GET_LOCK/', '1' )->when(
+			'/START TRANSACTION|^COMMIT|RELEASE_LOCK/',
+			static function ( string $sql ) use ( &$seen, $db ): int {
+				$seen[ $sql ] = $db->reconnect_retries;
+				return 1;
+			}
+		);
+
+		$this->assertTrue( Db::lock( 'x' ) );
+		$this->assertSame( 0, $this->db->reconnect_retries );
+		$this->assertTrue( Db::begin( array( 'match_lineups' ) ) );
+		$this->assertTrue( Db::commit() );
+		$this->assertSame( 0, $this->db->reconnect_retries, 'Still off while the lock is held.' );
+		Db::unlock( 'x' );
+		$this->assertSame( 5, $this->db->reconnect_retries, 'Back to what WordPress had.' );
+		$this->assertSame( 0, $seen['START TRANSACTION'] );
+		$this->assertSame( 0, $seen['COMMIT'] );
+	}
+
+	public function test_reconnecting_comes_back_after_a_rollback_and_after_a_refused_lock(): void {
+		$this->db->all_innodb();
+		$this->assertTrue( Db::begin( array( 'match_lineups' ) ) );
+		Db::rollback();
+		$this->assertSame( 5, $this->db->reconnect_retries );
+
+		$this->db->when( '/GET_LOCK/', '0' );
+		$this->assertFalse( Db::lock( 'x' ) );
+		$this->assertSame( 5, $this->db->reconnect_retries );
+
+		Db::rollback(); // A second rollback with nothing open changes nothing.
+		$this->assertSame( 5, $this->db->reconnect_retries );
+	}
 	/**
 	 * The lock name inside a GET_LOCK or RELEASE_LOCK statement.
 	 *

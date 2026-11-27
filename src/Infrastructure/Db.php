@@ -22,6 +22,27 @@ final class Db {
 	private static ?string $connection = null;
 
 	/**
+	 * How many open guards (a lock, a transaction) are holding WordPress's reconnecting switched off.
+	 *
+	 * @var int
+	 */
+	private static int $guards = 0;
+
+	/**
+	 * WordPress's own reconnect setting, put back when the last guard ends.
+	 *
+	 * @var mixed
+	 */
+	private static mixed $saved_retries = null;
+
+	/**
+	 * Whether a transaction is open.
+	 *
+	 * @var bool
+	 */
+	private static bool $open = false;
+
+	/**
 	 * Whether WordPress is really talking to SQLite (the test database) instead of MySQL or MariaDB.
 	 * The SQLite drop-in file defines its marker constant even on a site set to MySQL, so this asks
 	 * which database class is in use.
@@ -82,18 +103,74 @@ final class Db {
 	 */
 	public static function begin( array $tables = array() ): bool {
 		global $wpdb;
+		if ( ! self::enter() ) {
+			return false;
+		}
 		if ( array() !== $tables && ! self::can_roll_back( $tables ) ) {
+			self::leave();
 			return false;
 		}
+		// The same connection before and after START TRANSACTION, or the transaction is not ours.
+		$before = self::connection_id();
 		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+			self::leave();
 			return false;
 		}
-		self::$connection = self::connection_id();
-		if ( ! self::is_sqlite() && null === self::$connection ) {
-			self::rollback();
+		$after = self::connection_id();
+		if ( ! self::is_sqlite() && ( null === $after || $after !== $before ) ) {
+			$wpdb->query( 'ROLLBACK' );
+			self::leave();
 			return false;
 		}
+		self::$connection = $after;
+		self::$open       = true;
 		return true;
+	}
+
+	/**
+	 * Stops WordPress from silently reconnecting while a lock or transaction is open.
+	 *
+	 * When the server drops us, wpdb::query() reconnects and runs the statement again on the new
+	 * connection. That connection has no transaction and no locks, so the statement would be saved
+	 * on its own, half way through a change. With reconnecting off, the lost connection ends the
+	 * request (WordPress shows its database error page), and the server undoes the open transaction.
+	 *
+	 * Guards nest: the setting comes back when the last one ends. Nothing to do on SQLite. If the
+	 * setting cannot be switched off, the answer is false and the caller must not write.
+	 */
+	private static function enter(): bool {
+		global $wpdb;
+		if ( self::is_sqlite() ) {
+			return true;
+		}
+		if ( 0 === self::$guards ) {
+			try {
+				$property            = new \ReflectionProperty( $wpdb, 'reconnect_retries' ); // Protected in wpdb, so reflection.
+				self::$saved_retries = $property->getValue( $wpdb );
+				$property->setValue( $wpdb, 0 );
+			} catch ( \ReflectionException ) {
+				return false;
+			}
+		}
+		++self::$guards;
+		return true;
+	}
+
+	/**
+	 * Ends one guard started by enter(), restoring WordPress's reconnecting after the last one.
+	 */
+	private static function leave(): void {
+		global $wpdb;
+		if ( self::is_sqlite() || self::$guards < 1 ) {
+			return;
+		}
+		if ( 0 === --self::$guards ) {
+			try {
+				( new \ReflectionProperty( $wpdb, 'reconnect_retries' ) )->setValue( $wpdb, self::$saved_retries );
+			} catch ( \ReflectionException ) {
+				return; // It was set a moment ago, so this cannot happen.
+			}
+		}
 	}
 
 	/**
@@ -154,13 +231,14 @@ final class Db {
 	 */
 	public static function commit(): bool {
 		global $wpdb;
-		// On a new connection the transaction is already gone and the earlier writes are lost. Say so.
-		if ( self::connection_unchanged() && false !== $wpdb->query( 'COMMIT' ) ) {
-			self::$connection = null;
-			return true;
+		// A new connection means the transaction is already gone, and so are the earlier writes. Say so,
+		// both before COMMIT (writes lost) and after it (COMMIT itself run again on a fresh connection).
+		if ( ! self::connection_unchanged() || false === $wpdb->query( 'COMMIT' ) || ! self::connection_unchanged() ) {
+			self::rollback();
+			return false;
 		}
-		self::rollback();
-		return false;
+		self::finish();
+		return true;
 	}
 
 	/**
@@ -169,7 +247,18 @@ final class Db {
 	public static function rollback(): void {
 		global $wpdb;
 		$wpdb->query( 'ROLLBACK' );
-		self::$connection = null;
+		self::finish();
+	}
+
+	/**
+	 * Marks the open transaction as over and ends its guard.
+	 */
+	private static function finish(): void {
+		if ( self::$open ) {
+			self::$open       = false;
+			self::$connection = null;
+			self::leave();
+		}
 	}
 
 	/**
@@ -188,8 +277,16 @@ final class Db {
 		if ( self::is_sqlite() ) {
 			return true;
 		}
+		// A lock belongs to one connection, so no silent reconnecting while we hold it.
+		if ( ! self::enter() ) {
+			return false;
+		}
 		$got = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', self::lock_name( $name ), $seconds ) );
-		return '1' === (string) $got;
+		if ( '1' !== (string) $got ) {
+			self::leave();
+			return false;
+		}
+		return true;
 	}
 
 	/**
@@ -203,6 +300,7 @@ final class Db {
 			return;
 		}
 		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', self::lock_name( $name ) ) );
+		self::leave();
 	}
 
 	/**

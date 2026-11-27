@@ -103,18 +103,19 @@ final class Migrations {
 					null,
 					(int) $group['tenant_id']
 				);
-				// WordPress retries a statement on a new connection if the server drops us. That retry would run
-				// outside this transaction, so check the connection, and let the delete work only while its audit row exists.
+				// Db::begin() already stops WordPress reconnecting and retrying a write outside this transaction.
+				// As well: check the connection, and let the delete work only while this attempt's audit row exists.
 				if ( false === $logged || ! Db::connection_unchanged() ) {
 					Db::rollback();
 					return false;
 				}
 				$deleted = $wpdb->query(
 					$wpdb->prepare(
-						'DELETE FROM %i WHERE id = %d AND EXISTS ( SELECT 1 FROM %i WHERE tenant_id = %d AND action = %s AND entity_type = %s AND entity_id = %d AND reason = %s )',
+						'DELETE FROM %i WHERE id = %d AND EXISTS ( SELECT 1 FROM %i WHERE id = %d AND tenant_id = %d AND action = %s AND entity_type = %s AND entity_id = %d AND reason = %s )',
 						$table,
 						(int) $row['id'],
 						Schema::table( 'audit_log' ),
+						$logged, // This attempt's own audit row: ids are never reused, so an old or rolled-back one cannot match.
 						(int) $group['tenant_id'],
 						self::AUDIT_ACTION,
 						'match',

@@ -30,6 +30,13 @@ class FakeWpdb {
 	public string $dbname = 'site_one';
 
 	/**
+	 * Like wpdb's setting: how many times it tries to reconnect (and then run a statement again).
+	 *
+	 * @var int
+	 */
+	public int $reconnect_retries = 5;
+
+	/**
 	 * Error text of the last statement, empty when it worked.
 	 *
 	 * @var string
@@ -67,6 +74,23 @@ class FakeWpdb {
 	public function when( string $pattern, mixed $answer = null, bool $error = false ): self {
 		$this->rules[] = array( $pattern, $answer, $error );
 		return $this;
+	}
+
+	/**
+	 * Answers each CONNECTION_ID() query with the next id in the list (the last one repeats).
+	 *
+	 * @param array<int, string> $ids Connection ids, in the order they are asked for.
+	 */
+	public function connection_ids( array $ids ): self {
+		$asked = 0;
+		return $this->when(
+			'/CONNECTION_ID/',
+			static function () use ( $ids, &$asked ): string {
+				$id = $ids[ min( $asked, count( $ids ) - 1 ) ];
+				++$asked;
+				return $id;
+			}
+		);
 	}
 
 	/**
