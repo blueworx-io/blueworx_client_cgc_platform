@@ -63,16 +63,9 @@ final class HandicapEngine {
 			$work[ $i ] = self::work_out_player( $player, $profile, $format );
 		}
 
-		self::apply_penalties( $work, $players, $profile );
-
 		$off_the_low = in_array( $format, self::OFF_THE_LOW, true );
-		$lows        = array();
-		if ( $off_the_low ) {
-			foreach ( $players as $i => $player ) {
-				$group          = HandicapProfile::LOW_PER_SIDE === $profile->low_reference ? $player->side : '';
-				$lows[ $group ] = isset( $lows[ $group ] ) ? min( $lows[ $group ], $work[ $i ]['base'] ) : $work[ $i ]['base'];
-			}
-		}
+		self::apply_penalties( $work, $players, $profile, $off_the_low );
+		$lows = $off_the_low ? self::lows( $work, $players, $profile ) : array();
 
 		$results = array();
 		foreach ( $players as $i => $player ) {
@@ -93,7 +86,8 @@ final class HandicapEngine {
 				$strokes -= $w['penalty'];
 			}
 			// Stroke play has no lowest to subtract: the playing handicap is the shots received.
-			$playing = $off_the_low ? $w['base'] : $strokes;
+			// In matchplay it is the number before the lowest comes off, with any penalty taken off it.
+			$playing = $off_the_low ? $w['base'] - ( $w['pct_on_diff'] ? $w['penalty'] : 0 ) : $strokes;
 
 			$results[] = new PlayerHandicap(
 				$player,
@@ -194,7 +188,11 @@ final class HandicapEngine {
 			$hi = min( $hi, $profile->index_cap ); // A plus (negative) index is never touched by the cap.
 		}
 
-		// Eligibility: enough rounds, whatever the allowance source. An organiser's tier skips it.
+		// Eligibility: enough rounds, whatever the allowance source. An organiser's tier skips it,
+		// but only a tier that exists in the profile.
+		if ( null !== $player->tier_override && null === $profile->tier_by_number( $player->tier_override ) ) {
+			throw new InvalidArgumentException( "Player {$player->player_id}: tier {$player->tier_override} does not exist in the profile." );
+		}
 		if ( null === $player->tier_override && $player->rounds_12m < $profile->min_rounds_12m ) {
 			throw new InvalidArgumentException(
 				"Player {$player->player_id} is not eligible: {$player->rounds_12m} rounds in 12 months, {$profile->min_rounds_12m} needed."
@@ -259,6 +257,23 @@ final class HandicapEngine {
 	}
 
 	/**
+	 * The lowest playing handicap in each group (everyone, or each side).
+	 *
+	 * @param array<int, array<string, mixed>> $work    Working figures, by player position.
+	 * @param array<int, PlayerHandicapInput>  $players The players.
+	 * @param HandicapProfile                  $profile Rules.
+	 * @return array<string, int>
+	 */
+	private static function lows( array $work, array $players, HandicapProfile $profile ): array {
+		$lows = array();
+		foreach ( $players as $i => $player ) {
+			$group          = HandicapProfile::LOW_PER_SIDE === $profile->low_reference ? $player->side : '';
+			$lows[ $group ] = isset( $lows[ $group ] ) ? min( $lows[ $group ], $work[ $i ]['base'] ) : $work[ $i ]['base'];
+		}
+		return $lows;
+	}
+
+	/**
 	 * Takes the stage penalty off the players it applies to (one fewer stroke each).
 	 *
 	 * Per player: every flagged player loses the shots. Per team: each team with a flagged
@@ -268,8 +283,9 @@ final class HandicapEngine {
 	 * @param array<int, array<string, mixed>> $work    Working figures, by player position. Changed in place.
 	 * @param array<int, PlayerHandicapInput>  $players The players.
 	 * @param HandicapProfile                  $profile Rules.
+	 * @param bool                             $off_the_low Whether the format subtracts the lowest handicap.
 	 */
-	private static function apply_penalties( array &$work, array $players, HandicapProfile $profile ): void {
+	private static function apply_penalties( array &$work, array $players, HandicapProfile $profile, bool $off_the_low ): void {
 		if ( $profile->penalty_shots < 1 ) {
 			return;
 		}
@@ -288,11 +304,21 @@ final class HandicapEngine {
 					$flagged[ (string) $player->team ] = true;
 				}
 			}
+			// The player who receives the most shots pays. Where the percentage comes last, that is
+			// the difference to the lowest times the player's own percentage, not the raw handicap.
+			$lows  = $off_the_low ? self::lows( $work, $players, $profile ) : array();
+			$shots = array();
+			foreach ( $players as $i => $player ) {
+				$group       = ( $off_the_low && HandicapProfile::LOW_PER_SIDE === $profile->low_reference ) ? $player->side : '';
+				$shots[ $i ] = $work[ $i ]['pct_on_diff']
+					? ( $work[ $i ]['base'] - ( $lows[ $group ] ?? 0 ) ) * $work[ $i ]['pct']
+					: $work[ $i ]['base'];
+			}
 			// Array keys turn numeric strings back into integers, so compare as strings on both sides.
 			foreach ( array_keys( $flagged ) as $team ) {
 				$pick = null;
 				foreach ( $players as $i => $player ) {
-					if ( (string) $player->team === (string) $team && ( null === $pick || $work[ $i ]['base'] > $work[ $pick ]['base'] ) ) {
+					if ( (string) $player->team === (string) $team && ( null === $pick || $shots[ $i ] > $shots[ $pick ] ) ) {
 						$pick = $i;
 					}
 				}

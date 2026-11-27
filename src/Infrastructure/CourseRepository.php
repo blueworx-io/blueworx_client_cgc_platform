@@ -25,6 +25,13 @@ use WP_Error;
 final class CourseRepository {
 
 	/**
+	 * Tables a course change writes to. All must support transactions.
+	 *
+	 * @var list<string>
+	 */
+	private const TABLES = array( 'courses', 'tees', 'tee_holes' );
+
+	/**
 	 * Adds a course.
 	 *
 	 * @param array<string, mixed> $data      Fields: name, club, lat, lng.
@@ -98,14 +105,27 @@ final class CourseRepository {
 			}
 		}
 
-		if ( ! Db::begin() ) {
+		if ( ! Db::begin( self::TABLES ) ) {
 			return self::db_error();
 		}
-		foreach ( self::tees_for_course( $id, $tenant_id ) as $tee ) {
-			if ( ! self::delete_tee_rows( $tee->id, $tenant_id ) ) {
-				Db::rollback();
-				return self::db_error();
-			}
+		// Delete by course in SQL, so a failed tee lookup cannot leave tees and holes behind.
+		$tees  = Schema::table( 'tees' );
+		$holes = Schema::table( 'tee_holes' );
+		$gone  = $wpdb->query(
+			$wpdb->prepare( "DELETE FROM {$holes} WHERE tenant_id = %d AND tee_id IN ( SELECT id FROM {$tees} WHERE course_id = %d AND tenant_id = %d )", $tenant_id, $id, $tenant_id ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table names from Schema.
+		);
+		if ( false !== $gone ) {
+			$gone = $wpdb->delete(
+				$tees,
+				array(
+					'course_id' => $id,
+					'tenant_id' => $tenant_id,
+				)
+			);
+		}
+		if ( false === $gone ) {
+			Db::rollback();
+			return self::db_error();
 		}
 		$ok = $wpdb->delete(
 			Schema::table( 'courses' ),
@@ -181,7 +201,7 @@ final class CourseRepository {
 			return self::invalid( $errors );
 		}
 
-		if ( ! Db::begin() ) {
+		if ( ! Db::begin( self::TABLES ) ) {
 			return self::db_error();
 		}
 		$ok = $wpdb->insert( Schema::table( 'tees' ), self::tee_row( $tee ) + array( 'course_id' => $course_id ) + self::base_row( $tenant_id ) );
@@ -218,7 +238,7 @@ final class CourseRepository {
 			return self::invalid( $errors );
 		}
 
-		if ( ! Db::begin() ) {
+		if ( ! Db::begin( self::TABLES ) ) {
 			return self::db_error();
 		}
 		$where = array(
@@ -257,7 +277,7 @@ final class CourseRepository {
 		if ( null === self::get_tee( $id, $tenant_id ) ) {
 			return new WP_Error( 'cgc_not_found', __( 'Tee not found.', 'cgc' ) );
 		}
-		if ( ! Db::begin() ) {
+		if ( ! Db::begin( self::TABLES ) ) {
 			return self::db_error();
 		}
 		if ( ! self::delete_tee_rows( $id, $tenant_id ) ) {

@@ -31,6 +31,13 @@ use WP_Error;
 final class LineupSnapshotRepository {
 
 	/**
+	 * Tables a snapshot change writes to. All must support transactions.
+	 *
+	 * @var list<string>
+	 */
+	private const TABLES = array( 'match_lineups', 'audit_log' );
+
+	/**
 	 * Works out the handicaps for a match lineup and stores one snapshot per player.
 	 *
 	 * Replacing existing snapshots needs a reason. Players who had a snapshot but are not in
@@ -51,11 +58,12 @@ final class LineupSnapshotRepository {
 			return new WP_Error( 'cgc_handicap', $e->getMessage() );
 		}
 
-		if ( ! Db::begin() ) {
+		if ( ! Db::begin( self::TABLES ) ) {
 			return self::db_error();
 		}
 
-		$existing = self::get_for_match( $match_id, $tenant_id );
+		// Locked read: an overlapping save for the same match waits here and then sees this one's result.
+		$existing = self::get_for_match( $match_id, $tenant_id, true );
 		if ( array() !== $existing && '' === trim( $reason ) ) {
 			Db::rollback();
 			return new WP_Error( 'cgc_snapshot_exists', __( 'This match already has handicap snapshots. Give a reason to replace them.', 'cgc' ) );
@@ -100,7 +108,7 @@ final class LineupSnapshotRepository {
 	 * @return bool|WP_Error
 	 */
 	public static function store( int $match_id, int $team_id, int $player_id, array $snapshot, string $reason = '', int $tenant_id = 1 ): bool|WP_Error {
-		if ( ! Db::begin() ) {
+		if ( ! Db::begin( self::TABLES ) ) {
 			return self::db_error();
 		}
 		$saved = self::store_row( $match_id, $team_id, $player_id, $snapshot, $reason, $tenant_id );
@@ -114,19 +122,21 @@ final class LineupSnapshotRepository {
 	/**
 	 * Every snapshot stored for a match.
 	 *
-	 * @param int $match_id  Match id.
-	 * @param int $tenant_id Tenant.
+	 * @param int  $match_id  Match id.
+	 * @param int  $tenant_id Tenant.
+	 * @param bool $lock      Lock the rows until the open transaction ends (use inside a transaction only).
 	 * @return list<array{team_id: int, player_id: int, snapshot: array<string, mixed>}>
 	 */
-	public static function get_for_match( int $match_id, int $tenant_id = 1 ): array {
+	public static function get_for_match( int $match_id, int $tenant_id = 1, bool $lock = false ): array {
 		global $wpdb;
 
-		$table = Schema::table( 'match_lineups' );
-		$rows  = $wpdb->get_results(
-			$wpdb->prepare( "SELECT team_id, player_id, snapshot_json FROM {$table} WHERE match_id = %d AND tenant_id = %d ORDER BY id ASC", $match_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
+		$table    = Schema::table( 'match_lineups' );
+		$lock_sql = $lock ? ' FOR UPDATE' : '';
+		$rows     = $wpdb->get_results(
+			$wpdb->prepare( "SELECT team_id, player_id, snapshot_json FROM {$table} WHERE match_id = %d AND tenant_id = %d ORDER BY id ASC{$lock_sql}", $match_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
 			ARRAY_A
 		);
-		$out   = array();
+		$out      = array();
 		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
 			$snapshot = json_decode( (string) $row['snapshot_json'], true );
 			$out[]    = array(
@@ -249,7 +259,7 @@ final class LineupSnapshotRepository {
 
 		$table = Schema::table( 'match_lineups' );
 		$row   = $wpdb->get_row(
-			$wpdb->prepare( "SELECT id, snapshot_json FROM {$table} WHERE match_id = %d AND player_id = %d AND tenant_id = %d", $match_id, $player_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
+			$wpdb->prepare( "SELECT id, snapshot_json FROM {$table} WHERE match_id = %d AND player_id = %d AND tenant_id = %d FOR UPDATE", $match_id, $player_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
 			ARRAY_A
 		);
 		return is_array( $row ) ? $row : null;

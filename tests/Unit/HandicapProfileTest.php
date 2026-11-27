@@ -55,7 +55,7 @@ final class HandicapProfileTest extends TestCase {
 	}
 
 	public function test_integer_settings_must_be_whole_numbers(): void {
-		foreach ( array( array( 'min_rounds_12m' => 2.9 ), array( 'penalty_shots' => 0.5 ), array( 'penalty_shots' => '1.5' ) ) as $bad ) {
+		foreach ( array( array( 'min_rounds_12m' => 2.9 ), array( 'penalty_shots' => 0.5 ), array( 'penalty_shots' => '1.5' ), array( 'min_rounds_12m' => 'd' ), array( 'penalty_shots' => 'abc' ) ) as $bad ) {
 			try {
 				HandicapProfile::from_array( $bad );
 				$this->fail( 'Expected a rejection for ' . (string) json_encode( $bad ) );

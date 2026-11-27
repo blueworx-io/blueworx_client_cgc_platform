@@ -604,7 +604,7 @@ final class Schema {
 			$lines[] = $key;
 		}
 
-		return 'CREATE TABLE ' . $prefix . $short . " (\n" . implode( ",\n", $lines ) . "\n) " . $charset_collate . ';';
+		return 'CREATE TABLE ' . $prefix . $short . " (\n" . implode( ",\n", $lines ) . "\n) ENGINE=InnoDB " . $charset_collate . ';';
 	}
 
 	/**

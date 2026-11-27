@@ -387,6 +387,46 @@ final class HandicapEngineTest extends TestCase {
 		$this->assertCount( 1, HandicapEngine::calculate( array( $player ), $profile ), 'An organiser tier skips the check.' );
 	}
 
+	public function test_a_made_up_tier_does_not_waive_the_minimum_rounds(): void {
+		$profile = HandicapProfile::whs_2024()->with( array( 'min_rounds_12m' => 3 ) );
+		$player  = new PlayerHandicapInput( 1, 10.0, 0, Fixtures::tee(), false, null, 999 );
+		$this->expectException( InvalidArgumentException::class );
+		HandicapEngine::calculate( array( $player ), $profile );
+	}
+
+	public function test_a_team_penalty_goes_to_the_player_who_receives_the_most_shots(): void {
+		// Tier 1 gets 90% and Tier 2 75% of the difference to the lowest. Course handicaps 0 (low), 21 and 20:
+		// the Tier 2 player has the higher course handicap but gets 16 shots, the Tier 1 player gets 18.
+		$tee     = Fixtures::tee( 113, 72.0, 72 );
+		$profile = HandicapProfile::cgc()->with(
+			array(
+				'method'        => HandicapProfile::METHOD_DIFF_THEN_PCT,
+				'penalty_shots' => 1,
+				'penalty_scope' => HandicapProfile::PENALTY_PER_TEAM,
+			)
+		);
+		$players = array(
+			new PlayerHandicapInput( 1, 0.0, 15, $tee, false, null, null, false, 'low', 'a' ),
+			new PlayerHandicapInput( 2, 21.0, 5, $tee, false, null, null, true, 'x', 'b' ),
+			new PlayerHandicapInput( 3, 20.0, 15, $tee, false, null, null, true, 'x', 'b' ),
+		);
+		$results = HandicapEngine::calculate( $players, $profile );
+		$this->assertSame( 0, $results[1]->penalty, 'The Tier 2 player gets 16 shots.' );
+		$this->assertSame( 1, $results[2]->penalty, 'The Tier 1 player gets 18 shots, so pays.' );
+		$this->assertSame( 17, $results[2]->strokes );
+		$this->assertSame( 16, $results[1]->strokes );
+	}
+
+	public function test_a_matchplay_penalty_shows_in_the_playing_handicap(): void {
+		$tee     = Fixtures::tee( 113, 72.0, 72 );
+		$low     = new PlayerHandicapInput( 1, 4.0, 15, $tee, false, null, null, false, 1, 'a' );
+		$other   = new PlayerHandicapInput( 2, 10.0, 15, $tee, false, null, null, true, 2, 'b' );
+		$profile = HandicapProfile::whs_2024()->with( array( 'penalty_shots' => 1 ) );
+		$result  = HandicapEngine::calculate( array( $low, $other ), $profile )[1];
+		$this->assertSame( 4, $result->strokes );
+		$this->assertSame( 9, $result->playing_handicap );
+	}
+
 	public function test_stroke_play_playing_handicap_is_the_shots_received(): void {
 		$result = HandicapEngine::calculate( array( Fixtures::player( 1, 4.2 ) ), HandicapProfile::whs_2024(), HandicapEngine::FORMAT_STABLEFORD )[0];
 		$this->assertSame( 4, $result->course_handicap );

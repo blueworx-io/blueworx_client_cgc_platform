@@ -387,7 +387,7 @@ final class HandicapProfile {
 		if ( is_float( $value ) ) {
 			return floor( $value ) === $value;
 		}
-		return is_string( $value ) && 1 === preg_match( '/^-?d+$/', $value );
+		return is_string( $value ) && 1 === preg_match( '/^-?\d+$/', $value );
 	}
 
 	/**
