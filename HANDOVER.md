@@ -2,7 +2,7 @@
 
 For the production dev team. Updated at the end of every milestone. Spec: `docs/BUILD_BRIEF.md`.
 
-Current state: **M1 Handicap engine, v0.2.0.**
+Current state: **M1 Handicap engine, v0.2.2.** Checked: 102 PHPUnit tests and 4 Playwright tests pass.
 
 ## What is real vs mocked
 
