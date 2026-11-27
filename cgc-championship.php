@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CGC Championship
  * Description: Creator Golf Club championship platform: entry, groups, brackets, scoring and finals (demo build).
- * Version: 0.1.6
+ * Version: 0.2.1
  * Requires at least: 6.5
  * Requires PHP: 8.1
  * Author: BlueWorx
@@ -18,10 +18,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Mirrors the Version header above. Used for asset cache-busting.
-const CGC_VERSION = '0.1.6';
+const CGC_VERSION = '0.2.1';
 
 // Changes only when the database schema changes. Triggers dbDelta and data migrations.
-const CGC_DB_VERSION = '3';
+const CGC_DB_VERSION = '4';
 
 const CGC_PLUGIN_FILE = __FILE__;
 

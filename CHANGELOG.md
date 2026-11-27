@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+- Review fixes for M1: overlapping lineup saves wait for each other, saving needs tables that can roll back (new tables are created as InnoDB), course deletion removes tees and holes in one step, a team penalty goes to the player with the most shots, a fake tier no longer skips the minimum rounds, and text such as "d" is refused where a whole number is needed.
+
+## 0.2.0
+
+- M1: the handicap engine. Works out each player's strokes for CGC's method (index cap 28, Tier 1 and 2, plus handicaps reversed) or the WHS four-ball method, from a per-stage handicap profile.
+- Stroke allocation by stroke index, a handicap snapshot stored for every player in every match, and Stableford and four-ball matchplay scorers (match state, margin such as 3&2, dormie, extra holes).
+- Course, tee and hole data with checks: slope 55 to 155, stroke index 1 to 18 once each, hole pars add up.
+
 ## 0.1.6
 
 - Added approved-deps.json so the dependency check passes.

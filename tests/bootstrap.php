@@ -37,3 +37,16 @@ if ( ! function_exists( 'update_option' ) ) {
 		return true;
 	}
 }
+
+if ( ! function_exists( '__' ) ) {
+	/**
+	 * Stub of __(): returns the text unchanged.
+	 *
+	 * @param string $text   Text.
+	 * @param string $domain Text domain.
+	 */
+	function __( string $text, string $domain = 'default' ): string {
+		unset( $domain );
+		return $text;
+	}
+}
