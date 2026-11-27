@@ -1,11 +1,11 @@
 {
   "name": "cgc-championship",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "CGC Championship WordPress plugin (front-end bundles).",
   "scripts": {
-    "build": "wp-scripts build",
-    "start": "wp-scripts start",
+    "build": "wp-scripts build --webpack-src-dir=assets/src",
+    "start": "wp-scripts start --webpack-src-dir=assets/src",
     "test:version": "node --test scripts/check-version.test.mjs",
     "check:version": "node scripts/check-version.mjs",
     "hooks": "git config core.hooksPath .githooks"
