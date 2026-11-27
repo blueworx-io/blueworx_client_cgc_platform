@@ -7,6 +7,8 @@ jobs:
       plugin_slug: cgc-championship
       # Tests run against a disposable real WordPress the run provisions itself.
       use_local_wordpress: true
+      # Developer tools (the version check and its test) never ship in the plugin.
+      exclude_paths: /scripts
       # Pin the check scripts to the same major as the workflow above.
       foundation_ref: v1
     secrets: inherit
