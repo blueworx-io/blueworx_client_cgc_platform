@@ -25,6 +25,7 @@ final class Installer {
 	 * Activation hook.
 	 */
 	public static function activate(): void {
+		delete_transient( self::FAILED_TRANSIENT );
 		if ( self::install() ) {
 			return;
 		}

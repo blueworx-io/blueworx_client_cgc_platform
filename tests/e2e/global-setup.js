@@ -47,12 +47,18 @@ add_action( 'init', function () {
 } );
 `;
 
-function ensureComposerPackages() {
-	if ( fs.existsSync( path.join( ROOT, 'vendor', 'autoload.php' ) ) ) {
+// The plugin folder the test site really loads (the site may link or copy it).
+function pluginDir( contentDir ) {
+	const installed = path.join( contentDir, 'plugins', SLUG );
+	return fs.existsSync( installed ) ? fs.realpathSync( installed ) : ROOT;
+}
+
+function ensureComposerPackages( dir ) {
+	if ( fs.existsSync( path.join( dir, 'vendor', 'autoload.php' ) ) ) {
 		return false;
 	}
 	execFileSync( 'composer', [ 'install', '--no-dev', '--no-interaction', '--no-progress' ], {
-		cwd: ROOT,
+		cwd: dir,
 		stdio: 'inherit',
 		shell: process.platform === 'win32',
 	} );
@@ -83,6 +89,11 @@ async function cyclePlugin( baseURL ) {
 }
 
 module.exports = async ( config ) => {
+	const baseURL = config.projects[ 0 ].use.baseURL;
+	const local = [ '127.0.0.1', 'localhost' ].includes( new URL( baseURL ).hostname );
+	if ( ! local && ! process.env.CGC_WP_CONTENT_DIR ) {
+		throw new Error( `${ baseURL } is not a local test site. Set CGC_WP_CONTENT_DIR to that site's wp-content folder.` );
+	}
 	const contentDir = process.env.CGC_WP_CONTENT_DIR || path.join( ROOT, '.wp-test', 'wp', 'wp-content' );
 	if ( ! fs.existsSync( contentDir ) ) {
 		throw new Error(
@@ -93,7 +104,7 @@ module.exports = async ( config ) => {
 	fs.mkdirSync( dir, { recursive: true } );
 	fs.writeFileSync( path.join( dir, 'cgc-test-harness.php' ), MU_PLUGIN );
 
-	if ( ensureComposerPackages() ) {
-		await cyclePlugin( config.projects[ 0 ].use.baseURL );
+	if ( ensureComposerPackages( pluginDir( contentDir ) ) ) {
+		await cyclePlugin( baseURL );
 	}
 };

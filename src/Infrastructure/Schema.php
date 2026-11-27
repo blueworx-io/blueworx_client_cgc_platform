@@ -550,9 +550,9 @@ final class Schema {
 	public static function index_mismatches( array $rows, string $short ): array {
 		$found = array();
 		foreach ( $rows as $row ) {
-			$name                     = (string) ( $row['Key_name'] ?? '' );
-			$found[ $name ]['unique'] = 0 === (int) ( $row['Non_unique'] ?? 1 );
-			$found[ $name ]['columns'][ (int) ( $row['Seq_in_index'] ?? 0 ) ] = strtolower( (string) ( $row['Column_name'] ?? '' ) );
+			$name                        = (string) ( $row['Key_name'] ?? '' );
+			$found[ $name ]['unique']    = 0 === (int) ( $row['Non_unique'] ?? 1 );
+			$found[ $name ]['columns'][] = strtolower( (string) ( $row['Column_name'] ?? '' ) ); // Row order, not Seq_in_index: SQLite reports the same position for every column.
 		}
 		$bad = array();
 		foreach ( self::expected_index_definitions( $short ) as $name => $def ) {
@@ -560,7 +560,6 @@ final class Schema {
 				$bad[] = $name;
 				continue;
 			}
-			ksort( $found[ $name ]['columns'] );
 			$columns = array_map( 'strtolower', $def['columns'] );
 			if ( $found[ $name ]['unique'] !== $def['unique'] || array_values( $found[ $name ]['columns'] ) !== $columns ) {
 				$bad[] = $name;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6
+
+- Added approved-deps.json so the dependency check passes.
+- Index check works on SQLite; reactivation clears the setup-failure notice.
+- Browser test setup refuses a non-local site unless its wp-content folder is given, and installs packages in the plugin copy the site loads.
+
 ## 0.1.5
 
 - Index checks now compare columns and uniqueness; failed database setup retries every 5 minutes with an admin notice.
