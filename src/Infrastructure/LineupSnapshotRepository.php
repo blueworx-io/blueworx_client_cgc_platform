@@ -58,44 +58,44 @@ final class LineupSnapshotRepository {
 			return new WP_Error( 'cgc_handicap', $e->getMessage() );
 		}
 
-		if ( ! Db::begin( self::TABLES ) ) {
-			return self::db_error();
-		}
+		return self::locked(
+			$match_id,
+			$tenant_id,
+			static function () use ( $match_id, $results, $profile, $reason, $tenant_id ): array|WP_Error {
+				// Locked read: it also proves the database is answering before anything is written.
+				$existing = self::load_locked( $match_id, $tenant_id );
+				if ( null === $existing ) {
+					return self::db_error();
+				}
+				if ( array() !== $existing && '' === trim( $reason ) ) {
+					return new WP_Error( 'cgc_snapshot_exists', __( 'This match already has handicap snapshots. Give a reason to replace them.', 'cgc' ) );
+				}
 
-		// Locked read: an overlapping save for the same match waits here and then sees this one's result.
-		$existing = self::get_for_match( $match_id, $tenant_id, true );
-		if ( array() !== $existing && '' === trim( $reason ) ) {
-			Db::rollback();
-			return new WP_Error( 'cgc_snapshot_exists', __( 'This match already has handicap snapshots. Give a reason to replace them.', 'cgc' ) );
-		}
+				$stored  = array();
+				$kept_by = array();
+				foreach ( $results as $result ) {
+					$snapshot = $result->to_snapshot( $profile );
+					$saved    = self::store_row( $match_id, (int) $result->input->team, $result->input->player_id, $snapshot, $reason, $tenant_id );
+					if ( is_wp_error( $saved ) ) {
+						return $saved;
+					}
+					$kept_by[ $result->input->player_id ] = true;
+					$stored[]                             = $snapshot;
+				}
 
-		$stored  = array();
-		$kept_by = array();
-		foreach ( $results as $result ) {
-			$snapshot = $result->to_snapshot( $profile );
-			$saved    = self::store_row( $match_id, (int) $result->input->team, $result->input->player_id, $snapshot, $reason, $tenant_id );
-			if ( is_wp_error( $saved ) ) {
-				Db::rollback();
-				return $saved;
+				foreach ( $existing as $row ) {
+					if ( isset( $kept_by[ $row['player_id'] ] ) ) {
+						continue;
+					}
+					$removed = self::remove_row( $match_id, $row['player_id'], $row['snapshot'], $reason, $tenant_id );
+					if ( is_wp_error( $removed ) ) {
+						return $removed;
+					}
+				}
+				return $stored;
 			}
-			$kept_by[ $result->input->player_id ] = true;
-			$stored[]                             = $snapshot;
-		}
-
-		foreach ( $existing as $row ) {
-			if ( isset( $kept_by[ $row['player_id'] ] ) ) {
-				continue;
-			}
-			$removed = self::remove_row( $match_id, $row['player_id'], $row['snapshot'], $reason, $tenant_id );
-			if ( is_wp_error( $removed ) ) {
-				Db::rollback();
-				return $removed;
-			}
-		}
-
-		return Db::commit() ? $stored : self::db_error();
+		);
 	}
-
 	/**
 	 * Stores one player's snapshot.
 	 *
@@ -108,26 +108,77 @@ final class LineupSnapshotRepository {
 	 * @return bool|WP_Error
 	 */
 	public static function store( int $match_id, int $team_id, int $player_id, array $snapshot, string $reason = '', int $tenant_id = 1 ): bool|WP_Error {
-		if ( ! Db::begin( self::TABLES ) ) {
-			return self::db_error();
-		}
-		$saved = self::store_row( $match_id, $team_id, $player_id, $snapshot, $reason, $tenant_id );
-		if ( is_wp_error( $saved ) ) {
-			Db::rollback();
-			return $saved;
-		}
-		return Db::commit() ? true : self::db_error();
+		return self::locked(
+			$match_id,
+			$tenant_id,
+			static fn(): bool|WP_Error => self::store_row( $match_id, $team_id, $player_id, $snapshot, $reason, $tenant_id )
+		);
 	}
 
 	/**
 	 * Every snapshot stored for a match.
 	 *
-	 * @param int  $match_id  Match id.
-	 * @param int  $tenant_id Tenant.
-	 * @param bool $lock      Lock the rows until the open transaction ends (use inside a transaction only).
+	 * @param int $match_id  Match id.
+	 * @param int $tenant_id Tenant.
 	 * @return list<array{team_id: int, player_id: int, snapshot: array<string, mixed>}>
 	 */
-	public static function get_for_match( int $match_id, int $tenant_id = 1, bool $lock = false ): array {
+	public static function get_for_match( int $match_id, int $tenant_id = 1 ): array {
+		return self::read_match( $match_id, $tenant_id, false ) ?? array();
+	}
+
+	/**
+	 * Runs a save while holding the match's lock, inside one transaction.
+	 *
+	 * The lock is taken first, so two saves for the same match (even the very first ones, when there
+	 * are no rows to lock yet) run one after the other and never mix their lineups. If the lock or the
+	 * transaction cannot be had, nothing is written.
+	 *
+	 * @template T
+	 * @param int                      $match_id  Match id.
+	 * @param int                      $tenant_id Tenant.
+	 * @param callable(): (T|WP_Error) $work      The writes. Return a WP_Error to undo them.
+	 * @return T|WP_Error
+	 */
+	private static function locked( int $match_id, int $tenant_id, callable $work ): mixed {
+		$lock = 'cgc_lineup_' . $tenant_id . '_' . $match_id;
+		if ( ! Db::lock( $lock ) ) {
+			return new WP_Error( 'cgc_busy', __( 'Another change to this match is in progress. Try again in a moment.', 'cgc' ) );
+		}
+		try {
+			if ( ! Db::begin( self::TABLES ) ) {
+				return self::db_error();
+			}
+			$result = $work();
+			if ( is_wp_error( $result ) ) {
+				Db::rollback();
+				return $result;
+			}
+			return Db::commit() ? $result : self::db_error();
+		} finally {
+			Db::unlock( $lock );
+		}
+	}
+
+	/**
+	 * Reads a match's snapshots and locks the rows until the open transaction ends.
+	 *
+	 * @param int $match_id  Match id.
+	 * @param int $tenant_id Tenant.
+	 * @return list<array{team_id: int, player_id: int, snapshot: array<string, mixed>}>|null Null when the read failed.
+	 */
+	private static function load_locked( int $match_id, int $tenant_id ): ?array {
+		return self::read_match( $match_id, $tenant_id, true );
+	}
+
+	/**
+	 * Reads a match's snapshot rows.
+	 *
+	 * @param int  $match_id  Match id.
+	 * @param int  $tenant_id Tenant.
+	 * @param bool $lock      Lock the rows (inside a transaction only).
+	 * @return list<array{team_id: int, player_id: int, snapshot: array<string, mixed>}>|null Null when the query failed.
+	 */
+	private static function read_match( int $match_id, int $tenant_id, bool $lock ): ?array {
 		global $wpdb;
 
 		$table    = Schema::table( 'match_lineups' );
@@ -136,8 +187,11 @@ final class LineupSnapshotRepository {
 			$wpdb->prepare( "SELECT team_id, player_id, snapshot_json FROM {$table} WHERE match_id = %d AND tenant_id = %d ORDER BY id ASC{$lock_sql}", $match_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
 			ARRAY_A
 		);
-		$out      = array();
-		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+		if ( ! is_array( $rows ) || Db::last_query_failed() ) {
+			return null;
+		}
+		$out = array();
+		foreach ( $rows as $row ) {
 			$snapshot = json_decode( (string) $row['snapshot_json'], true );
 			$out[]    = array(
 				'team_id'   => (int) $row['team_id'],
@@ -147,7 +201,6 @@ final class LineupSnapshotRepository {
 		}
 		return $out;
 	}
-
 	/**
 	 * Inserts or replaces one player's row. The caller owns the transaction.
 	 *
@@ -169,6 +222,9 @@ final class LineupSnapshotRepository {
 
 		$table = Schema::table( 'match_lineups' );
 		$row   = self::find_row( $match_id, $player_id, $tenant_id );
+		if ( false === $row ) {
+			return self::db_error();
+		}
 
 		if ( null === $row ) {
 			$now = Clock::mysql();
@@ -189,7 +245,7 @@ final class LineupSnapshotRepository {
 				return true;
 			}
 			// A save that overlapped this one may have won the unique key. Never overwrite it.
-			return null !== self::find_row( $match_id, $player_id, $tenant_id )
+			return is_array( self::find_row( $match_id, $player_id, $tenant_id ) )
 				? new WP_Error( 'cgc_snapshot_exists', __( 'This player already has a handicap snapshot for the match.', 'cgc' ) )
 				: self::db_error();
 		}
@@ -252,9 +308,9 @@ final class LineupSnapshotRepository {
 	 * @param int $match_id  Match id.
 	 * @param int $player_id Player id.
 	 * @param int $tenant_id Tenant.
-	 * @return array<string, mixed>|null
+	 * @return array<string, mixed>|false|null The row, null when there is none, false when the query failed.
 	 */
-	private static function find_row( int $match_id, int $player_id, int $tenant_id ): ?array {
+	private static function find_row( int $match_id, int $player_id, int $tenant_id ): array|false|null {
 		global $wpdb;
 
 		$table = Schema::table( 'match_lineups' );
@@ -262,6 +318,9 @@ final class LineupSnapshotRepository {
 			$wpdb->prepare( "SELECT id, snapshot_json FROM {$table} WHERE match_id = %d AND player_id = %d AND tenant_id = %d FOR UPDATE", $match_id, $player_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
 			ARRAY_A
 		);
+		if ( Db::last_query_failed() ) {
+			return false;
+		}
 		return is_array( $row ) ? $row : null;
 	}
 

@@ -305,13 +305,14 @@ final class HandicapEngine {
 				}
 			}
 			// The player who receives the most shots pays. Where the percentage comes last, that is
-			// the difference to the lowest times the player's own percentage, not the raw handicap.
+			// the rounded difference to the lowest at the player's own percentage, not the raw handicap.
+			// Rounded, so two players who receive the same number of shots tie (the first listed pays).
 			$lows  = $off_the_low ? self::lows( $work, $players, $profile ) : array();
 			$shots = array();
 			foreach ( $players as $i => $player ) {
 				$group       = ( $off_the_low && HandicapProfile::LOW_PER_SIDE === $profile->low_reference ) ? $player->side : '';
 				$shots[ $i ] = $work[ $i ]['pct_on_diff']
-					? ( $work[ $i ]['base'] - ( $lows[ $group ] ?? 0 ) ) * $work[ $i ]['pct']
+					? self::round_value( ( $work[ $i ]['base'] - ( $lows[ $group ] ?? 0 ) ) * $work[ $i ]['pct'] / 100, $profile->rounding )
 					: $work[ $i ]['base'];
 			}
 			// Array keys turn numeric strings back into integers, so compare as strings on both sides.

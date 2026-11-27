@@ -77,6 +77,11 @@ final class Installer {
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
+		// Fix what dbDelta cannot: the table engine, and duplicate rows that block a unique key.
+		if ( ! Migrations::run() ) {
+			return false;
+		}
+
 		foreach ( Schema::all_sql( $wpdb->prefix . 'cgc_', $wpdb->get_charset_collate() ) as $sql ) {
 			dbDelta( $sql );
 		}

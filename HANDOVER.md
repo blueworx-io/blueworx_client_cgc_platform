@@ -2,7 +2,7 @@
 
 For the production dev team. Updated at the end of every milestone. Spec: `docs/BUILD_BRIEF.md`.
 
-Current state: **M1 Handicap engine, v0.2.2.** Checked: 102 PHPUnit tests and 4 Playwright tests pass.
+Current state: **M1 Handicap engine, v0.2.3.** Checked: 119 PHPUnit tests and 4 Playwright tests pass.
 
 ## What is real vs mocked
 
@@ -46,11 +46,16 @@ Choices made where the brief was silent (easy to change in `HandicapEngine`; con
 - Extra holes: a level match after 18 needs extra holes (the first hole won decides, margin text "19th hole"). A putt-off is not scored here (M5). Pass `allow_halved` for formats where a halved match is allowed.
 - Holes entered after a match is decided are ignored and counted in `ignored_holes`.
 - `freeze_at` only says when the index must be read (`HandicapEngine::freeze_instant()`). Reading the index at that moment is the caller's job.
-- The database allows one snapshot per tenant, match and player (unique key on `cgc_match_lineups`, `CGC_DB_VERSION` 4). A whole lineup is saved in one transaction; replacing a lineup removes players who are no longer in it and audits each removal (`handicap.snapshot_remove`).
+- The database allows one snapshot per tenant, match and player (unique key on `cgc_match_lineups`, `CGC_DB_VERSION` 4, still enforced). A whole lineup is saved in one transaction; replacing a lineup removes players who are no longer in it and audits each removal (`handicap.snapshot_remove`).
 - A snapshot freezes the tee's hole pars and stroke indexes, so later edits to a scorecard cannot change an old result.
 - With `diff_then_pct` the penalty comes off the final shots (not off the number being scaled). Minimum rounds apply to every allowance source; an organiser tier skips them. In stroke-play formats the snapshot's playing handicap is the shots received.
 - Four-ball Stableford is scored per player on that player's own tee (`score_fourball` takes a `tee` per player). Matchplay `holes_from_gross` still takes one tee for stroke indexes.
 - A tee's course rating must be 40 to 90, its par 54 to 80, and each hole par 3 to 6.
+- Saving a lineup takes a MySQL named lock (`GET_LOCK`, `Db::lock()`) for the match before it starts the transaction, and releases it after commit or rollback. If the lock, the engine check or the locked read fails, nothing is written. On the SQLite test site the lock is skipped (one writer at a time already).
+- `Db::begin()` fails closed: if the InnoDB check cannot be run, or a table is missing or not InnoDB, no transaction starts.
+- `Infrastructure/Migrations` runs before dbDelta on every install or upgrade (`CGC_DB_VERSION` 5): converts non-InnoDB plugin tables to InnoDB and removes duplicate snapshot rows (newest kept, each removal audited as `handicap.snapshot_duplicate_removed`).
+- A per-team penalty tie is decided on the rounded shots each player receives; the first listed pays on a tie.
+- The lock, engine and upgrade code was only tested against a scripted database (`tests/Support/FakeWpdb.php`) and on SQLite. It has not run on real MySQL or MariaDB: do that before relying on it (two overlapping saves for one match, and an upgrade of a site whose tables are MyISAM).
 - The repositories are only tested through `tests/e2e/handicap-m1.spec.js` on the SQLite test site. Run it once on MySQL/MariaDB too.
 
 ## Data model

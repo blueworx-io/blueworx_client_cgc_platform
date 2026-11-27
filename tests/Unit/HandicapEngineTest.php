@@ -417,6 +417,29 @@ final class HandicapEngineTest extends TestCase {
 		$this->assertSame( 16, $results[1]->strokes );
 	}
 
+	public function test_a_team_penalty_tie_is_decided_on_rounded_shots(): void {
+		// Course handicaps 0 (low), 20 (Tier 2, 75%) and 17 (Tier 1, 90%). Both get 15 shots once rounded
+		// (15 and 15.3), so the first listed pays. Comparing the unrounded 15.3 would pick the second.
+		$tee     = Fixtures::tee( 113, 72.0, 72 );
+		$profile = HandicapProfile::cgc()->with(
+			array(
+				'method'        => HandicapProfile::METHOD_DIFF_THEN_PCT,
+				'penalty_shots' => 1,
+				'penalty_scope' => HandicapProfile::PENALTY_PER_TEAM,
+			)
+		);
+		$players = array(
+			new PlayerHandicapInput( 1, 0.0, 15, $tee, false, null, null, false, 'low', 'a' ),
+			new PlayerHandicapInput( 2, 20.0, 5, $tee, false, null, null, true, 'x', 'b' ),
+			new PlayerHandicapInput( 3, 17.0, 15, $tee, false, null, null, true, 'x', 'b' ),
+		);
+		$results = HandicapEngine::calculate( $players, $profile );
+		$this->assertSame( 1, $results[1]->penalty, 'Tied on 15 shots: the first listed pays.' );
+		$this->assertSame( 0, $results[2]->penalty );
+		$this->assertSame( 14, $results[1]->strokes );
+		$this->assertSame( 15, $results[2]->strokes );
+	}
+
 	public function test_a_matchplay_penalty_shows_in_the_playing_handicap(): void {
 		$tee     = Fixtures::tee( 113, 72.0, 72 );
 		$low     = new PlayerHandicapInput( 1, 4.0, 15, $tee, false, null, null, false, 1, 'a' );
