@@ -157,8 +157,9 @@ final class MatchplayScorer {
 			if ( $played > self::HOLES ) {
 				// Extra holes: the first hole won decides.
 				if ( 0 !== $lead ) {
-					$decided = true;
-					$margin  = sprintf(
+					$decided     = true;
+					$needs_extra = false;
+					$margin      = sprintf(
 						/* translators: %s: hole number with its ending, such as 19th. */
 						__( '%s hole', 'cgc' ),
 						self::ordinal( $played )

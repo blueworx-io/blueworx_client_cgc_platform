@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 const CGC_VERSION = '0.2.0';
 
 // Changes only when the database schema changes. Triggers dbDelta and data migrations.
-const CGC_DB_VERSION = '3';
+const CGC_DB_VERSION = '4';
 
 const CGC_PLUGIN_FILE = __FILE__;
 

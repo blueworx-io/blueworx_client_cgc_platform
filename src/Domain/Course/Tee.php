@@ -67,6 +67,15 @@ final class Tee {
 			'par'           => $this->par,
 			'course_rating' => $this->course_rating,
 			'slope'         => $this->slope,
+			// The holes are frozen with the snapshot, so a later edit to the scorecard cannot change a result.
+			'holes'         => array_map(
+				static fn( TeeHole $h ): array => array(
+					'hole' => $h->hole,
+					'par'  => $h->par,
+					'si'   => $h->si,
+				),
+				$this->holes
+			),
 		);
 	}
 }

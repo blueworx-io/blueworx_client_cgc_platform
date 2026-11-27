@@ -291,7 +291,7 @@ final class Schema {
 					'player_id'     => 'fk',
 					'snapshot_json' => 'json', // index, tier, tee, CH, PH, strokes, settings hash.
 				),
-				'keys' => array( 'KEY match_id (match_id)' ),
+				'keys' => array( 'KEY match_id (match_id)', 'UNIQUE KEY tenant_match_player (tenant_id, match_id, player_id)' ),
 			),
 			'match_proposals'        => array(
 				'cols' => array(

@@ -68,6 +68,7 @@ add_action( 'init', function () {
 	$course_id = $repo::create_course( array( 'name' => 'Test Links', 'club' => 'Test GC', 'lat' => 51.5, 'lng' => -1.2 ) );
 	$out['course_created'] = is_int( $course_id );
 	$out['bad_course']     = $err( $repo::create_course( array( 'name' => '' ) ) );
+	$out['tag_only_name']  = $err( $repo::create_course( array( 'name' => '<b></b>' ) ) );
 
 	$bad_slope             = $repo::create_tee( $course_id, array_merge( $tee, array( 'slope' => 156 ) ), $holes );
 	$out['bad_slope']      = $err( $bad_slope );
@@ -90,7 +91,7 @@ add_action( 'init', function () {
 		return new \CGC\Championship\Domain\Handicap\PlayerHandicapInput( $id, $idx, $rounds, $loaded, false, null, null, false, $team, $team === 1 ? 'a' : 'b' );
 	};
 	$players = array( $mk( 101, 4.2, 14, 1 ), $mk( 102, 12.8, 6, 1 ), $mk( 103, 18.5, 20, 2 ), $mk( 104, 31.0, 8, 2 ) );
-	$match   = 987654;
+	$match   = random_int( 100000, 2000000000 ); // Fresh each run: audit rows are never deleted.
 
 	$first                 = $snaps::snapshot_match( $match, $players, $profile, 'fourball_mp' );
 	$out['snapshot_saved'] = is_array( $first ) ? count( $first ) : $err( $first );
@@ -108,6 +109,21 @@ add_action( 'init', function () {
 	global $wpdb;
 	$audit               = \CGC\Championship\Infrastructure\Schema::table( 'audit_log' );
 	$out['audit_rows']   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$audit} WHERE action = %s AND entity_id = %d", 'handicap.snapshot_replace', $match ) );
+
+	// A reserve replaces player 104: the old row goes, the removal is audited, three rows stay unchanged in number.
+	$reserve_lineup        = array( $players[0], $players[1], $players[2], $mk( 105, 20.0, 9, 2 ) );
+	$swap                  = $snaps::snapshot_match( $match, $reserve_lineup, $profile, 'fourball_mp', 'Reserve came in' );
+	$out['swap_ok']        = is_array( $swap );
+	$out['after_swap']     = array_map( static fn( $r ) => $r['player_id'], $snaps::get_for_match( $match ) );
+	$out['removal_audits'] = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$audit} WHERE action = %s AND entity_id = %d", 'handicap.snapshot_remove', $match ) );
+
+	// A second row for the same player is refused by the database itself.
+	$lineups_table         = Schema::table( 'match_lineups' );
+	$now                   = gmdate( 'Y-m-d H:i:s' );
+	$suppress              = $wpdb->suppress_errors( true );
+	$dupe                  = $wpdb->insert( $lineups_table, array( 'tenant_id' => 1, 'created_at' => $now, 'updated_at' => $now, 'match_id' => $match, 'team_id' => 1, 'player_id' => 101, 'snapshot_json' => '{}' ) );
+	$wpdb->suppress_errors( $suppress );
+	$out['duplicate_blocked'] = false === $dupe;
 	$lineups             = \CGC\Championship\Infrastructure\Schema::table( 'match_lineups' );
 	$wpdb->delete( $lineups, array( 'match_id' => $match ) );
 

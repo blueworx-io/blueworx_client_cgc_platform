@@ -87,6 +87,13 @@ final class HandicapEngine {
 			} else {
 				$strokes = $w['pct_on_diff'] ? self::round_value( $w['base'] * $w['pct'] / 100, $profile->rounding ) : $w['base'];
 			}
+			if ( $w['pct_on_diff'] ) {
+				// The percentage came last, so the penalty comes off the shots. Taking it off the
+				// number being scaled could round it away (6 x 90% and 5 x 90% are both 5).
+				$strokes -= $w['penalty'];
+			}
+			// Stroke play has no lowest to subtract: the playing handicap is the shots received.
+			$playing = $off_the_low ? $w['base'] : $strokes;
 
 			$results[] = new PlayerHandicap(
 				$player,
@@ -98,7 +105,7 @@ final class HandicapEngine {
 				$w['ch_raw'],
 				$w['ch'],
 				$w['ph_raw'],
-				$w['base'],
+				$playing,
 				$w['penalty'],
 				$low,
 				$strokes
@@ -187,20 +194,22 @@ final class HandicapEngine {
 			$hi = min( $hi, $profile->index_cap ); // A plus (negative) index is never touched by the cap.
 		}
 
+		// Eligibility: enough rounds, whatever the allowance source. An organiser's tier skips it.
+		if ( null === $player->tier_override && $player->rounds_12m < $profile->min_rounds_12m ) {
+			throw new InvalidArgumentException(
+				"Player {$player->player_id} is not eligible: {$player->rounds_12m} rounds in 12 months, {$profile->min_rounds_12m} needed."
+			);
+		}
+
 		// Allowance: CGC tier, or the format table.
 		$tier       = null;
-		$overridden = false;
+		$overridden = null !== $player->tier_override;
 		if ( HandicapProfile::SOURCE_TIER === $profile->allowance_source ) {
-			if ( null !== $player->tier_override ) {
-				$rule       = $profile->tier_by_number( $player->tier_override );
-				$overridden = true;
-			} else {
-				$rule = $profile->tier_for_rounds( $player->rounds_12m );
-			}
+			$rule = $overridden
+				? $profile->tier_by_number( (int) $player->tier_override )
+				: $profile->tier_for_rounds( $player->rounds_12m );
 			if ( null === $rule ) {
-				throw new InvalidArgumentException(
-					"Player {$player->player_id} is not eligible: {$player->rounds_12m} rounds in 12 months, {$profile->min_rounds_12m} needed."
-				);
+				throw new InvalidArgumentException( "Player {$player->player_id} has no matching tier." );
 			}
 			$tier = $rule['tier'];
 			$pct  = $hi < 0 ? $rule['plus_pct'] : $rule['pct']; // Plus handicaps reverse the percentages.
@@ -264,32 +273,40 @@ final class HandicapEngine {
 		if ( $profile->penalty_shots < 1 ) {
 			return;
 		}
+
+		$penalised = array();
 		if ( HandicapProfile::PENALTY_PER_PLAYER === $profile->penalty_scope ) {
 			foreach ( $players as $i => $player ) {
 				if ( $player->penalty ) {
-					$work[ $i ]['base']   -= $profile->penalty_shots;
-					$work[ $i ]['penalty'] = $profile->penalty_shots;
+					$penalised[] = $i;
 				}
 			}
-			return;
+		} else {
+			$flagged = array();
+			foreach ( $players as $player ) {
+				if ( $player->penalty ) {
+					$flagged[ (string) $player->team ] = true;
+				}
+			}
+			// Array keys turn numeric strings back into integers, so compare as strings on both sides.
+			foreach ( array_keys( $flagged ) as $team ) {
+				$pick = null;
+				foreach ( $players as $i => $player ) {
+					if ( (string) $player->team === (string) $team && ( null === $pick || $work[ $i ]['base'] > $work[ $pick ]['base'] ) ) {
+						$pick = $i;
+					}
+				}
+				if ( null !== $pick ) {
+					$penalised[] = $pick;
+				}
+			}
 		}
 
-		$flagged = array();
-		foreach ( $players as $player ) {
-			if ( $player->penalty ) {
-				$flagged[ (string) $player->team ] = true;
-			}
-		}
-		foreach ( array_keys( $flagged ) as $team ) {
-			$pick = null;
-			foreach ( $players as $i => $player ) {
-				if ( (string) $player->team === $team && ( null === $pick || $work[ $i ]['base'] > $work[ $pick ]['base'] ) ) {
-					$pick = $i;
-				}
-			}
-			if ( null !== $pick ) {
-				$work[ $pick ]['base']   -= $profile->penalty_shots;
-				$work[ $pick ]['penalty'] = $profile->penalty_shots;
+		foreach ( $penalised as $i ) {
+			$work[ $i ]['penalty'] = $profile->penalty_shots;
+			if ( ! $work[ $i ]['pct_on_diff'] ) {
+				// The allowance is already in the number, so the shots come straight off it.
+				$work[ $i ]['base'] -= $profile->penalty_shots;
 			}
 		}
 	}

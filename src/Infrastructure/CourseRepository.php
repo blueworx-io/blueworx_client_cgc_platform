@@ -34,6 +34,7 @@ final class CourseRepository {
 	public static function create_course( array $data, int $tenant_id = 1 ): int|WP_Error {
 		global $wpdb;
 
+		$data   = self::clean_names( $data );
 		$errors = CourseValidator::validate_course( $data );
 		if ( array() !== $errors ) {
 			return self::invalid( $errors );
@@ -49,14 +50,15 @@ final class CourseRepository {
 	 * @param int                  $id        Course id.
 	 * @param array<string, mixed> $data      Fields: name, club, lat, lng.
 	 * @param int                  $tenant_id Tenant.
-	 * @return true|WP_Error
+	 * @return bool|WP_Error
 	 */
-	public static function update_course( int $id, array $data, int $tenant_id = 1 ): true|WP_Error {
+	public static function update_course( int $id, array $data, int $tenant_id = 1 ): bool|WP_Error {
 		global $wpdb;
 
 		if ( null === self::get_course( $id, $tenant_id ) ) {
 			return new WP_Error( 'cgc_not_found', __( 'Course not found.', 'cgc' ) );
 		}
+		$data   = self::clean_names( $data );
 		$errors = CourseValidator::validate_course( $data );
 		if ( array() !== $errors ) {
 			return self::invalid( $errors );
@@ -78,9 +80,9 @@ final class CourseRepository {
 	 *
 	 * @param int $id        Course id.
 	 * @param int $tenant_id Tenant.
-	 * @return true|WP_Error
+	 * @return bool|WP_Error
 	 */
-	public static function delete_course( int $id, int $tenant_id = 1 ): true|WP_Error {
+	public static function delete_course( int $id, int $tenant_id = 1 ): bool|WP_Error {
 		global $wpdb;
 
 		if ( null === self::get_course( $id, $tenant_id ) ) {
@@ -96,8 +98,14 @@ final class CourseRepository {
 			}
 		}
 
+		if ( ! Db::begin() ) {
+			return self::db_error();
+		}
 		foreach ( self::tees_for_course( $id, $tenant_id ) as $tee ) {
-			self::delete_tee( $tee->id, $tenant_id );
+			if ( ! self::delete_tee_rows( $tee->id, $tenant_id ) ) {
+				Db::rollback();
+				return self::db_error();
+			}
 		}
 		$ok = $wpdb->delete(
 			Schema::table( 'courses' ),
@@ -106,7 +114,11 @@ final class CourseRepository {
 				'tenant_id' => $tenant_id,
 			)
 		);
-		return false === $ok ? self::db_error() : true;
+		if ( false === $ok ) {
+			Db::rollback();
+			return self::db_error();
+		}
+		return Db::commit() ? true : self::db_error();
 	}
 
 	/**
@@ -163,24 +175,26 @@ final class CourseRepository {
 		if ( null === self::get_course( $course_id, $tenant_id ) ) {
 			return new WP_Error( 'cgc_not_found', __( 'Course not found.', 'cgc' ) );
 		}
+		$tee    = self::clean_names( $tee );
 		$errors = CourseValidator::validate_tee( $tee, $holes );
 		if ( array() !== $errors ) {
 			return self::invalid( $errors );
 		}
 
-		$wpdb->query( 'START TRANSACTION' );
+		if ( ! Db::begin() ) {
+			return self::db_error();
+		}
 		$ok = $wpdb->insert( Schema::table( 'tees' ), self::tee_row( $tee ) + array( 'course_id' => $course_id ) + self::base_row( $tenant_id ) );
 		if ( false === $ok ) {
-			$wpdb->query( 'ROLLBACK' );
+			Db::rollback();
 			return self::db_error();
 		}
 		$tee_id = (int) $wpdb->insert_id;
 		if ( ! self::insert_holes( $tee_id, $holes, $tenant_id ) ) {
-			$wpdb->query( 'ROLLBACK' );
+			Db::rollback();
 			return self::db_error();
 		}
-		$wpdb->query( 'COMMIT' );
-		return $tee_id;
+		return Db::commit() ? $tee_id : self::db_error();
 	}
 
 	/**
@@ -190,27 +204,30 @@ final class CourseRepository {
 	 * @param array<string, mixed>             $tee       Fields: name, gender, par, course_rating, slope.
 	 * @param array<int, array<string, mixed>> $holes     Rows: hole, par, si, yards.
 	 * @param int                              $tenant_id Tenant.
-	 * @return true|WP_Error
+	 * @return bool|WP_Error
 	 */
-	public static function update_tee( int $id, array $tee, array $holes, int $tenant_id = 1 ): true|WP_Error {
+	public static function update_tee( int $id, array $tee, array $holes, int $tenant_id = 1 ): bool|WP_Error {
 		global $wpdb;
 
 		if ( null === self::get_tee( $id, $tenant_id ) ) {
 			return new WP_Error( 'cgc_not_found', __( 'Tee not found.', 'cgc' ) );
 		}
+		$tee    = self::clean_names( $tee );
 		$errors = CourseValidator::validate_tee( $tee, $holes );
 		if ( array() !== $errors ) {
 			return self::invalid( $errors );
 		}
 
-		$wpdb->query( 'START TRANSACTION' );
+		if ( ! Db::begin() ) {
+			return self::db_error();
+		}
 		$where = array(
 			'id'        => $id,
 			'tenant_id' => $tenant_id,
 		);
 		$ok    = $wpdb->update( Schema::table( 'tees' ), self::tee_row( $tee ) + array( 'updated_at' => Clock::mysql() ), $where );
 		if ( false === $ok ) {
-			$wpdb->query( 'ROLLBACK' );
+			Db::rollback();
 			return self::db_error();
 		}
 		$deleted = $wpdb->delete(
@@ -221,11 +238,10 @@ final class CourseRepository {
 			)
 		);
 		if ( false === $deleted || ! self::insert_holes( $id, $holes, $tenant_id ) ) {
-			$wpdb->query( 'ROLLBACK' );
+			Db::rollback();
 			return self::db_error();
 		}
-		$wpdb->query( 'COMMIT' );
-		return true;
+		return Db::commit() ? true : self::db_error();
 	}
 
 	/**
@@ -233,29 +249,66 @@ final class CourseRepository {
 	 *
 	 * @param int $id        Tee id.
 	 * @param int $tenant_id Tenant.
-	 * @return true|WP_Error
+	 * @return bool|WP_Error
 	 */
-	public static function delete_tee( int $id, int $tenant_id = 1 ): true|WP_Error {
+	public static function delete_tee( int $id, int $tenant_id = 1 ): bool|WP_Error {
 		global $wpdb;
 
 		if ( null === self::get_tee( $id, $tenant_id ) ) {
 			return new WP_Error( 'cgc_not_found', __( 'Tee not found.', 'cgc' ) );
 		}
-		$wpdb->delete(
+		if ( ! Db::begin() ) {
+			return self::db_error();
+		}
+		if ( ! self::delete_tee_rows( $id, $tenant_id ) ) {
+			Db::rollback();
+			return self::db_error();
+		}
+		return Db::commit() ? true : self::db_error();
+	}
+
+	/**
+	 * Deletes a tee row and its hole rows. The caller owns the transaction.
+	 *
+	 * @param int $id        Tee id.
+	 * @param int $tenant_id Tenant.
+	 * @return bool Whether both deletes worked.
+	 */
+	private static function delete_tee_rows( int $id, int $tenant_id ): bool {
+		global $wpdb;
+
+		$holes = $wpdb->delete(
 			Schema::table( 'tee_holes' ),
 			array(
 				'tee_id'    => $id,
 				'tenant_id' => $tenant_id,
 			)
 		);
-		$ok = $wpdb->delete(
+		if ( false === $holes ) {
+			return false;
+		}
+		$tee = $wpdb->delete(
 			Schema::table( 'tees' ),
 			array(
 				'id'        => $id,
 				'tenant_id' => $tenant_id,
 			)
 		);
-		return false === $ok ? self::db_error() : true;
+		return false !== $tee;
+	}
+
+	/**
+	 * Cleans the name the way it will be saved, so validation sees what is stored.
+	 * A name made only of HTML tags becomes empty and is refused.
+	 *
+	 * @param array<array-key, mixed> $data Course or tee fields.
+	 * @return array<array-key, mixed>
+	 */
+	private static function clean_names( array $data ): array {
+		if ( isset( $data['name'] ) && is_scalar( $data['name'] ) ) {
+			$data['name'] = sanitize_text_field( (string) $data['name'] );
+		}
+		return $data;
 	}
 
 	/**

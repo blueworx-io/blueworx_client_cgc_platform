@@ -19,8 +19,12 @@ use WP_Error;
 
 /**
  * Stores each player's handicap snapshot in cgc_match_lineups.snapshot_json, so any result can
- * be audited later. A stored snapshot is only replaced with a reason, and the change is audited
- * (Rule 2.10: the organiser may adjust any handicap at any stage).
+ * be audited later. A stored snapshot is only replaced with a reason, and every replacement or
+ * removal is audited (Rule 2.10: the organiser may adjust any handicap at any stage).
+ *
+ * A whole lineup is saved in one transaction: either every player is stored, replaced or
+ * removed together with its audit row, or nothing changes. The database allows one snapshot per
+ * tenant, match and player.
  *
  * This class does not check who is asking. The caller must.
  */
@@ -28,6 +32,9 @@ final class LineupSnapshotRepository {
 
 	/**
 	 * Works out the handicaps for a match lineup and stores one snapshot per player.
+	 *
+	 * Replacing existing snapshots needs a reason. Players who had a snapshot but are not in
+	 * the new lineup (a reserve came in) are removed, and the removal is audited.
 	 *
 	 * @param int                             $match_id  Match id.
 	 * @param array<int, PlayerHandicapInput> $players   Everyone in the match. PlayerHandicapInput::$team is the team id.
@@ -44,22 +51,41 @@ final class LineupSnapshotRepository {
 			return new WP_Error( 'cgc_handicap', $e->getMessage() );
 		}
 
-		// Check first, so a refused replacement changes nothing.
+		if ( ! Db::begin() ) {
+			return self::db_error();
+		}
+
 		$existing = self::get_for_match( $match_id, $tenant_id );
 		if ( array() !== $existing && '' === trim( $reason ) ) {
+			Db::rollback();
 			return new WP_Error( 'cgc_snapshot_exists', __( 'This match already has handicap snapshots. Give a reason to replace them.', 'cgc' ) );
 		}
 
-		$stored = array();
+		$stored  = array();
+		$kept_by = array();
 		foreach ( $results as $result ) {
 			$snapshot = $result->to_snapshot( $profile );
-			$saved    = self::store( $match_id, (int) $result->input->team, $result->input->player_id, $snapshot, $reason, $tenant_id );
+			$saved    = self::store_row( $match_id, (int) $result->input->team, $result->input->player_id, $snapshot, $reason, $tenant_id );
 			if ( is_wp_error( $saved ) ) {
+				Db::rollback();
 				return $saved;
 			}
-			$stored[] = $snapshot;
+			$kept_by[ $result->input->player_id ] = true;
+			$stored[]                             = $snapshot;
 		}
-		return $stored;
+
+		foreach ( $existing as $row ) {
+			if ( isset( $kept_by[ $row['player_id'] ] ) ) {
+				continue;
+			}
+			$removed = self::remove_row( $match_id, $row['player_id'], $row['snapshot'], $reason, $tenant_id );
+			if ( is_wp_error( $removed ) ) {
+				Db::rollback();
+				return $removed;
+			}
+		}
+
+		return Db::commit() ? $stored : self::db_error();
 	}
 
 	/**
@@ -71,62 +97,18 @@ final class LineupSnapshotRepository {
 	 * @param array<string, mixed> $snapshot  Snapshot from PlayerHandicap::to_snapshot().
 	 * @param string               $reason    Required when this player already has a snapshot for the match.
 	 * @param int                  $tenant_id Tenant.
-	 * @return true|WP_Error
+	 * @return bool|WP_Error
 	 */
-	public static function store( int $match_id, int $team_id, int $player_id, array $snapshot, string $reason = '', int $tenant_id = 1 ): true|WP_Error {
-		global $wpdb;
-
-		$json = wp_json_encode( $snapshot );
-		if ( false === $json ) {
-			return new WP_Error( 'cgc_invalid', __( 'The snapshot could not be encoded.', 'cgc' ) );
+	public static function store( int $match_id, int $team_id, int $player_id, array $snapshot, string $reason = '', int $tenant_id = 1 ): bool|WP_Error {
+		if ( ! Db::begin() ) {
+			return self::db_error();
 		}
-
-		$table = Schema::table( 'match_lineups' );
-		$row   = $wpdb->get_row(
-			$wpdb->prepare( "SELECT id, snapshot_json FROM {$table} WHERE match_id = %d AND player_id = %d AND tenant_id = %d", $match_id, $player_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
-			ARRAY_A
-		);
-
-		if ( ! is_array( $row ) ) {
-			$now = Clock::mysql();
-			$ok  = $wpdb->insert(
-				$table,
-				array(
-					'tenant_id'     => $tenant_id,
-					'created_at'    => $now,
-					'updated_at'    => $now,
-					'is_demo'       => DemoMode::enabled() ? 1 : 0,
-					'match_id'      => $match_id,
-					'team_id'       => $team_id,
-					'player_id'     => $player_id,
-					'snapshot_json' => $json,
-				)
-			);
-			return false === $ok ? new WP_Error( 'cgc_db_error', __( 'The database could not save that.', 'cgc' ) ) : true;
+		$saved = self::store_row( $match_id, $team_id, $player_id, $snapshot, $reason, $tenant_id );
+		if ( is_wp_error( $saved ) ) {
+			Db::rollback();
+			return $saved;
 		}
-
-		if ( '' === trim( $reason ) ) {
-			return new WP_Error( 'cgc_snapshot_exists', __( 'This player already has a handicap snapshot for the match. Give a reason to replace it.', 'cgc' ) );
-		}
-
-		$before = json_decode( (string) ( $row['snapshot_json'] ?? '' ), true );
-		$ok     = $wpdb->update(
-			$table,
-			array(
-				'team_id'       => $team_id,
-				'snapshot_json' => $json,
-				'updated_at'    => Clock::mysql(),
-			),
-			array(
-				'id'        => (int) $row['id'],
-				'tenant_id' => $tenant_id,
-			)
-		);
-		if ( false === $ok ) {
-			return new WP_Error( 'cgc_db_error', __( 'The database could not save that.', 'cgc' ) );
-		}
-		AuditLogger::log( 'handicap.snapshot_replace', 'match', $match_id, $reason, is_array( $before ) ? $before : null, $snapshot, $tenant_id );
-		return true;
+		return Db::commit() ? true : self::db_error();
 	}
 
 	/**
@@ -154,5 +136,129 @@ final class LineupSnapshotRepository {
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * Inserts or replaces one player's row. The caller owns the transaction.
+	 *
+	 * @param int                  $match_id  Match id.
+	 * @param int                  $team_id   Team id.
+	 * @param int                  $player_id Player id.
+	 * @param array<string, mixed> $snapshot  Snapshot.
+	 * @param string               $reason    Required to replace an existing row.
+	 * @param int                  $tenant_id Tenant.
+	 * @return bool|WP_Error
+	 */
+	private static function store_row( int $match_id, int $team_id, int $player_id, array $snapshot, string $reason, int $tenant_id ): bool|WP_Error {
+		global $wpdb;
+
+		$json = wp_json_encode( $snapshot );
+		if ( false === $json ) {
+			return new WP_Error( 'cgc_invalid', __( 'The snapshot could not be encoded.', 'cgc' ) );
+		}
+
+		$table = Schema::table( 'match_lineups' );
+		$row   = self::find_row( $match_id, $player_id, $tenant_id );
+
+		if ( null === $row ) {
+			$now = Clock::mysql();
+			$ok  = $wpdb->insert(
+				$table,
+				array(
+					'tenant_id'     => $tenant_id,
+					'created_at'    => $now,
+					'updated_at'    => $now,
+					'is_demo'       => DemoMode::enabled() ? 1 : 0,
+					'match_id'      => $match_id,
+					'team_id'       => $team_id,
+					'player_id'     => $player_id,
+					'snapshot_json' => $json,
+				)
+			);
+			if ( false !== $ok ) {
+				return true;
+			}
+			// A save that overlapped this one may have won the unique key. Never overwrite it.
+			return null !== self::find_row( $match_id, $player_id, $tenant_id )
+				? new WP_Error( 'cgc_snapshot_exists', __( 'This player already has a handicap snapshot for the match.', 'cgc' ) )
+				: self::db_error();
+		}
+
+		if ( '' === trim( $reason ) ) {
+			return new WP_Error( 'cgc_snapshot_exists', __( 'This player already has a handicap snapshot for the match. Give a reason to replace it.', 'cgc' ) );
+		}
+
+		$ok = $wpdb->update(
+			$table,
+			array(
+				'team_id'       => $team_id,
+				'snapshot_json' => $json,
+				'updated_at'    => Clock::mysql(),
+			),
+			array(
+				'id'        => (int) $row['id'],
+				'tenant_id' => $tenant_id,
+			)
+		);
+		if ( false === $ok ) {
+			return self::db_error();
+		}
+		$before = json_decode( (string) $row['snapshot_json'], true );
+		$logged = AuditLogger::log( 'handicap.snapshot_replace', 'match', $match_id, $reason, is_array( $before ) ? $before : null, $snapshot, $tenant_id );
+		return false === $logged ? self::db_error() : true;
+	}
+
+	/**
+	 * Removes a player's row (they were replaced in the lineup) and audits it. The caller owns the transaction.
+	 *
+	 * @param int                  $match_id  Match id.
+	 * @param int                  $player_id Player id.
+	 * @param array<string, mixed> $before    The snapshot being removed.
+	 * @param string               $reason    Why.
+	 * @param int                  $tenant_id Tenant.
+	 * @return bool|WP_Error
+	 */
+	private static function remove_row( int $match_id, int $player_id, array $before, string $reason, int $tenant_id ): bool|WP_Error {
+		global $wpdb;
+
+		$ok = $wpdb->delete(
+			Schema::table( 'match_lineups' ),
+			array(
+				'match_id'  => $match_id,
+				'player_id' => $player_id,
+				'tenant_id' => $tenant_id,
+			)
+		);
+		if ( false === $ok ) {
+			return self::db_error();
+		}
+		$logged = AuditLogger::log( 'handicap.snapshot_remove', 'match', $match_id, $reason, $before, null, $tenant_id );
+		return false === $logged ? self::db_error() : true;
+	}
+
+	/**
+	 * One player's stored row for a match.
+	 *
+	 * @param int $match_id  Match id.
+	 * @param int $player_id Player id.
+	 * @param int $tenant_id Tenant.
+	 * @return array<string, mixed>|null
+	 */
+	private static function find_row( int $match_id, int $player_id, int $tenant_id ): ?array {
+		global $wpdb;
+
+		$table = Schema::table( 'match_lineups' );
+		$row   = $wpdb->get_row(
+			$wpdb->prepare( "SELECT id, snapshot_json FROM {$table} WHERE match_id = %d AND player_id = %d AND tenant_id = %d", $match_id, $player_id, $tenant_id ), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from Schema.
+			ARRAY_A
+		);
+		return is_array( $row ) ? $row : null;
+	}
+
+	/**
+	 * A database failure.
+	 */
+	private static function db_error(): WP_Error {
+		return new WP_Error( 'cgc_db_error', __( 'The database could not save that.', 'cgc' ) );
 	}
 }

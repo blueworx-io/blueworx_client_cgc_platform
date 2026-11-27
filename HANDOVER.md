@@ -46,6 +46,10 @@ Choices made where the brief was silent (easy to change in `HandicapEngine`; con
 - Extra holes: a level match after 18 needs extra holes (the first hole won decides, margin text "19th hole"). A putt-off is not scored here (M5). Pass `allow_halved` for formats where a halved match is allowed.
 - Holes entered after a match is decided are ignored and counted in `ignored_holes`.
 - `freeze_at` only says when the index must be read (`HandicapEngine::freeze_instant()`). Reading the index at that moment is the caller's job.
+- The database allows one snapshot per tenant, match and player (unique key on `cgc_match_lineups`, `CGC_DB_VERSION` 4). A whole lineup is saved in one transaction; replacing a lineup removes players who are no longer in it and audits each removal (`handicap.snapshot_remove`).
+- A snapshot freezes the tee's hole pars and stroke indexes, so later edits to a scorecard cannot change an old result.
+- With `diff_then_pct` the penalty comes off the final shots (not off the number being scaled). Minimum rounds apply to every allowance source; an organiser tier skips them. In stroke-play formats the snapshot's playing handicap is the shots received.
+- Four-ball Stableford is scored per player on that player's own tee (`score_fourball` takes a `tee` per player). Matchplay `holes_from_gross` still takes one tee for stroke indexes.
 - A tee's course rating must be 40 to 90, its par 54 to 80, and each hole par 3 to 6.
 - The repositories are only tested through `tests/e2e/handicap-m1.spec.js` on the SQLite test site. Run it once on MySQL/MariaDB too.
 

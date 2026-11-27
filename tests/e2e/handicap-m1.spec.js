@@ -14,6 +14,7 @@ test( 'courses, tees and handicap snapshots save, validate and read back on a re
 	// Validation refuses bad data and saves nothing.
 	expect( out.course_created ).toBe( true );
 	expect( out.bad_course ).toMatchObject( { code: 'cgc_invalid', fields: [ 'name' ] } );
+	expect( out.tag_only_name ).toMatchObject( { code: 'cgc_invalid', fields: [ 'name' ] } );
 	expect( out.bad_slope ).toMatchObject( { code: 'cgc_invalid' } );
 	expect( out.bad_slope.fields ).toContain( 'slope' );
 	expect( out.bad_si.fields ).toContain( 'holes.2.si' );
@@ -36,6 +37,13 @@ test( 'courses, tees and handicap snapshots save, validate and read back on a re
 	expect( out.replaced ).toBe( true );
 	expect( out.no_dupes ).toBe( 4 );
 	expect( out.audit_rows ).toBe( 4 );
+
+	// A reserve replaces a player: the old snapshot goes, the removal is audited.
+	expect( out.swap_ok ).toBe( true );
+	expect( out.after_swap ).toEqual( [ 101, 102, 103, 105 ] );
+	expect( out.removal_audits ).toBe( 1 );
+	// The database allows one snapshot per player per match.
+	expect( out.duplicate_blocked ).toBe( true );
 
 	// The stored snapshots hold the worked-example strokes (the tee was read before it was changed).
 	expect( out.stored_strokes ).toEqual( [ 0, 7, 15, 20 ] );

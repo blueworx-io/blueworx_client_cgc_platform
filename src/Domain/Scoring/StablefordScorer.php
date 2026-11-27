@@ -49,7 +49,8 @@ final class StablefordScorer {
 		$holes = array();
 		$total = 0;
 		foreach ( $numbers as $number ) {
-			$hole = $tee->hole( $number );
+			// Tee::hole() wraps past the last hole for matchplay extra holes. A round has no such holes.
+			$hole = ( $number >= 1 && $number <= count( $tee->holes ) ) ? $tee->hole( $number ) : null;
 			if ( null === $hole ) {
 				throw new InvalidArgumentException( "Hole $number is not on the tee." );
 			}
@@ -70,15 +71,14 @@ final class StablefordScorer {
 	/**
 	 * A four-ball Stableford side: on each hole the side scores its better partner's points.
 	 *
-	 * @param Tee                                                    $tee     The tee played.
-	 * @param list<array{strokes: int, gross: array<int, int|null>}> $players The side's players.
+	 * @param list<array{tee: Tee, strokes: int, gross: array<int, int|null>}> $players The side's players, each with the tee they played.
 	 * @return array{holes: list<array{hole: int, points: int}>, total: int}
 	 * @throws InvalidArgumentException When a hole number is not on the tee.
 	 */
-	public static function score_fourball( Tee $tee, array $players ): array {
+	public static function score_fourball( array $players ): array {
 		$best = array();
 		foreach ( $players as $player ) {
-			foreach ( self::score_round( $tee, $player['strokes'], $player['gross'] )['holes'] as $row ) {
+			foreach ( self::score_round( $player['tee'], $player['strokes'], $player['gross'] )['holes'] as $row ) {
 				$best[ $row['hole'] ] = max( $best[ $row['hole'] ] ?? 0, $row['points'] );
 			}
 		}

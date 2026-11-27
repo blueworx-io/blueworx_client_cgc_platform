@@ -121,6 +121,7 @@ final class MatchplayScorerTest extends TestCase {
 		$this->assertTrue( $won['decided'] );
 		$this->assertSame( 'b', $won['winner'] );
 		$this->assertSame( '21st hole', $won['margin_text'] );
+		$this->assertFalse( $won['needs_extra_holes'], 'A decided match does not ask for another hole.' );
 	}
 
 	public function test_a_level_match_can_be_halved_when_the_format_allows_it(): void {

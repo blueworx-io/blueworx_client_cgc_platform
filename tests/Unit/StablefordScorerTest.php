@@ -9,6 +9,8 @@ declare(strict_types=1);
 
 namespace CGC\Championship\Tests\Unit;
 
+use CGC\Championship\Domain\Course\Tee;
+use CGC\Championship\Domain\Course\TeeHole;
 use CGC\Championship\Domain\Scoring\StablefordScorer;
 use CGC\Championship\Tests\Support\Fixtures;
 use InvalidArgumentException;
@@ -58,9 +60,9 @@ final class StablefordScorerTest extends TestCase {
 
 	public function test_four_ball_takes_the_better_partner_on_each_hole(): void {
 		$result = StablefordScorer::score_fourball(
-			Fixtures::tee(),
 			array(
 				array(
+					'tee'     => Fixtures::tee(),
 					'strokes' => 0,
 					'gross'   => array(
 						1 => 4,
@@ -69,6 +71,7 @@ final class StablefordScorerTest extends TestCase {
 					),
 				),
 				array(
+					'tee'     => Fixtures::tee(),
 					'strokes' => 0,
 					'gross'   => array(
 						1 => 5,
@@ -80,6 +83,35 @@ final class StablefordScorerTest extends TestCase {
 		);
 		$this->assertSame( array( 2, 2, 2 ), array_column( $result['holes'], 'points' ) );
 		$this->assertSame( 6, $result['total'] );
+	}
+
+	public function test_four_ball_scores_each_partner_on_their_own_tee(): void {
+		// Same gross 5 on hole 1. Player 1's tee has hole 1 as a par 4 (net par with no stroke: 1 point).
+		// Player 2's tee has it as a par 5, so 5 is a par: 2 points.
+		$other_holes    = Fixtures::tee()->holes;
+		$other_holes[0] = new TeeHole( 1, 5, 7, 300 );
+		$other_tee      = new Tee( 2, 'Red', 'female', 73, 72.0, 120, $other_holes );
+
+		$result = StablefordScorer::score_fourball(
+			array(
+				array(
+					'tee'     => Fixtures::tee(),
+					'strokes' => 0,
+					'gross'   => array( 1 => 5 ),
+				),
+				array(
+					'tee'     => $other_tee,
+					'strokes' => 0,
+					'gross'   => array( 1 => 5 ),
+				),
+			)
+		);
+		$this->assertSame( array( 2 ), array_column( $result['holes'], 'points' ) );
+	}
+
+	public function test_a_hole_past_18_is_rejected_instead_of_wrapping_to_hole_one(): void {
+		$this->expectException( InvalidArgumentException::class );
+		StablefordScorer::score_round( Fixtures::tee(), 0, array( 19 => 4 ) );
 	}
 
 	public function test_a_hole_not_on_the_tee_is_rejected(): void {

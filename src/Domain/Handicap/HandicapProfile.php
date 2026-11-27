@@ -181,6 +181,10 @@ final class HandicapProfile {
 	 * @throws InvalidArgumentException When a value is not allowed.
 	 */
 	public static function from_array( array $data ): self {
+		$unknown = array_diff( array_keys( $data ), array_keys( self::cgc_defaults() ) );
+		if ( array() !== $unknown ) {
+			throw new InvalidArgumentException( 'Unknown handicap setting: ' . implode( ', ', array_map( 'strval', $unknown ) ) . '.' );
+		}
 		$d = array_merge( self::cgc_defaults(), $data );
 
 		$cap = $d['index_cap'];
@@ -189,7 +193,7 @@ final class HandicapProfile {
 		}
 
 		$min_rounds = $d['min_rounds_12m'];
-		if ( ! is_numeric( $min_rounds ) || (int) $min_rounds < 0 ) {
+		if ( ! self::is_whole( $min_rounds ) || (int) $min_rounds < 0 ) {
 			throw new InvalidArgumentException( 'min_rounds_12m must be zero or more.' );
 		}
 
@@ -212,7 +216,7 @@ final class HandicapProfile {
 		}
 
 		$penalty = $d['penalty_shots'];
-		if ( ! is_numeric( $penalty ) || (int) $penalty < 0 ) {
+		if ( ! self::is_whole( $penalty ) || (int) $penalty < 0 ) {
 			throw new InvalidArgumentException( 'penalty_shots must be zero or more.' );
 		}
 
@@ -347,6 +351,9 @@ final class HandicapProfile {
 				if ( ! isset( $rule[ $key ] ) || ! is_numeric( $rule[ $key ] ) ) {
 					throw new InvalidArgumentException( "Each tier rule needs a number for $key." );
 				}
+				if ( in_array( $key, array( 'tier', 'min_rounds' ), true ) && ! self::is_whole( $rule[ $key ] ) ) {
+					throw new InvalidArgumentException( "Tier rule $key must be a whole number." );
+				}
 			}
 			$tier = (int) $rule['tier'];
 			if ( isset( $seen[ $tier ] ) ) {
@@ -366,6 +373,21 @@ final class HandicapProfile {
 			);
 		}
 		return $clean;
+	}
+
+	/**
+	 * Whether a value is a whole number (an int, a digit string, or a float with no fraction).
+	 *
+	 * @param mixed $value Value to test.
+	 */
+	private static function is_whole( mixed $value ): bool {
+		if ( is_int( $value ) ) {
+			return true;
+		}
+		if ( is_float( $value ) ) {
+			return floor( $value ) === $value;
+		}
+		return is_string( $value ) && 1 === preg_match( '/^-?d+$/', $value );
 	}
 
 	/**

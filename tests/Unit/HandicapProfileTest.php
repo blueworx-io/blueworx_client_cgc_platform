@@ -49,6 +49,23 @@ final class HandicapProfileTest extends TestCase {
 		$this->assertSame( $p->hash(), $back->hash() );
 	}
 
+	public function test_an_unknown_setting_is_rejected_not_ignored(): void {
+		$this->expectException( InvalidArgumentException::class );
+		HandicapProfile::from_array( array( 'index_capp' => null ) );
+	}
+
+	public function test_integer_settings_must_be_whole_numbers(): void {
+		foreach ( array( array( 'min_rounds_12m' => 2.9 ), array( 'penalty_shots' => 0.5 ), array( 'penalty_shots' => '1.5' ) ) as $bad ) {
+			try {
+				HandicapProfile::from_array( $bad );
+				$this->fail( 'Expected a rejection for ' . (string) json_encode( $bad ) );
+			} catch ( InvalidArgumentException $e ) {
+				$this->assertNotSame( '', $e->getMessage() );
+			}
+		}
+		$this->assertSame( 2, HandicapProfile::from_array( array( 'min_rounds_12m' => 2.0 ) )->min_rounds_12m );
+	}
+
 	public function test_the_hash_changes_when_a_rule_changes(): void {
 		$this->assertNotSame( HandicapProfile::cgc()->hash(), HandicapProfile::cgc()->with( array( 'rounding' => 'half_even' ) )->hash() );
 	}

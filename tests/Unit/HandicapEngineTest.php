@@ -345,6 +345,69 @@ final class HandicapEngineTest extends TestCase {
 		$this->assertIsArray( json_decode( (string) json_encode( $snapshot ), true ) );
 	}
 
+	public function test_a_per_team_penalty_finds_numeric_team_ids(): void {
+		$profile = HandicapProfile::cgc()->with(
+			array(
+				'penalty_shots' => 1,
+				'penalty_scope' => HandicapProfile::PENALTY_PER_TEAM,
+			)
+		);
+		$players = array(
+			new PlayerHandicapInput( 1, 4.2, 14, Fixtures::tee(), false, null, null, true, 17 ),
+			new PlayerHandicapInput( 2, 12.8, 6, Fixtures::tee(), false, null, null, false, 17 ),
+		);
+		$results = HandicapEngine::calculate( $players, $profile, HandicapEngine::FORMAT_INDIVIDUAL );
+		$this->assertSame( array( 3, 9 ), $this->strokes( $results ), 'Taken from the highest handicap in team 17.' );
+		$this->assertSame( 1, $results[1]->penalty );
+	}
+
+	public function test_a_penalty_still_costs_a_shot_when_the_percentage_comes_last(): void {
+		// Course handicaps 4 and 10: the difference of 6 at 90% is 5 shots. A one-shot penalty must make it 4.
+		$tee   = Fixtures::tee( 113, 72.0, 72 );
+		$low   = new PlayerHandicapInput( 1, 4.0, 15, $tee, false, null, null, false, 1, 'a' );
+		$other = new PlayerHandicapInput( 2, 10.0, 15, $tee, false, null, null, false, 2, 'b' );
+		$this->assertSame( 5, HandicapEngine::calculate( array( $low, $other ), HandicapProfile::whs_2024() )[1]->strokes );
+
+		$penalised = new PlayerHandicapInput( 2, 10.0, 15, $tee, false, null, null, true, 2, 'b' );
+		$profile   = HandicapProfile::whs_2024()->with( array( 'penalty_shots' => 1 ) );
+		$result    = HandicapEngine::calculate( array( $low, $penalised ), $profile )[1];
+		$this->assertSame( 4, $result->strokes );
+		$this->assertSame( 1, $result->penalty );
+	}
+
+	public function test_minimum_rounds_apply_to_format_allowances_too(): void {
+		$profile = HandicapProfile::whs_2024()->with( array( 'min_rounds_12m' => 3 ) );
+		try {
+			HandicapEngine::calculate( array( Fixtures::player( 1, 10.0, 0 ) ), $profile );
+			$this->fail( 'A player with no rounds should be refused.' );
+		} catch ( InvalidArgumentException $e ) {
+			$this->assertStringContainsString( 'not eligible', $e->getMessage() );
+		}
+		$player = new PlayerHandicapInput( 1, 10.0, 0, Fixtures::tee(), false, null, 2 );
+		$this->assertCount( 1, HandicapEngine::calculate( array( $player ), $profile ), 'An organiser tier skips the check.' );
+	}
+
+	public function test_stroke_play_playing_handicap_is_the_shots_received(): void {
+		$result = HandicapEngine::calculate( array( Fixtures::player( 1, 4.2 ) ), HandicapProfile::whs_2024(), HandicapEngine::FORMAT_STABLEFORD )[0];
+		$this->assertSame( 4, $result->course_handicap );
+		$this->assertSame( 3, $result->strokes );
+		$this->assertSame( 3, $result->playing_handicap );
+	}
+
+	public function test_the_snapshot_freezes_the_holes_of_the_tee(): void {
+		$profile  = HandicapProfile::cgc();
+		$snapshot = HandicapEngine::calculate( $this->worked_example(), $profile )[0]->to_snapshot( $profile );
+		$this->assertCount( 18, $snapshot['tee']['holes'] );
+		$this->assertSame(
+			array(
+				'hole' => 2,
+				'par'  => 4,
+				'si'   => 1,
+			),
+			$snapshot['tee']['holes'][1]
+		);
+	}
+
 	public function test_an_unknown_format_is_rejected(): void {
 		$this->expectException( InvalidArgumentException::class );
 		HandicapEngine::calculate( array( Fixtures::player( 1, 4.2 ) ), HandicapProfile::cgc(), 'scramble' );
