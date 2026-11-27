@@ -13,7 +13,7 @@ namespace CGC\Championship\Tests\Support;
  * Records every statement. Answers come from rules: the first rule whose pattern matches the SQL wins.
  * A rule with $error set makes that statement fail the way wpdb does (false or null, last_error filled).
  */
-final class FakeWpdb {
+class FakeWpdb {
 
 	/**
 	 * Table prefix.
@@ -21,6 +21,13 @@ final class FakeWpdb {
 	 * @var string
 	 */
 	public string $prefix = 'wp_';
+
+	/**
+	 * Database name.
+	 *
+	 * @var string
+	 */
+	public string $dbname = 'site_one';
 
 	/**
 	 * Error text of the last statement, empty when it worked.
@@ -118,8 +125,11 @@ final class FakeWpdb {
 					$this->last_error = 'simulated failure';
 					return $failure;
 				}
-				return $rule[1];
+				return $rule[1] instanceof \Closure ? ( $rule[1] )( $sql ) : $rule[1];
 			}
+		}
+		if ( str_contains( $sql, 'CONNECTION_ID' ) ) {
+			return '42'; // The same connection throughout, unless a test says otherwise.
 		}
 		return $fallback;
 	}

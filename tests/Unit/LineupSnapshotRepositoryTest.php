@@ -48,7 +48,7 @@ final class LineupSnapshotRepositoryTest extends TestCase {
 		$result = $this->save();
 
 		$this->assertIsArray( $result );
-		$lock  = $this->db->position( "/GET_LOCK\\( 'cgc_lineup_1_55'/" );
+		$lock  = $this->db->position( "/GET_LOCK\\( '[0-9a-f]{12}_cgc_lineup_1_55'/" );
 		$begin = $this->db->position( '/START TRANSACTION/' );
 		$done  = $this->db->position( '/^COMMIT/' );
 		$free  = $this->db->position( '/RELEASE_LOCK/' );

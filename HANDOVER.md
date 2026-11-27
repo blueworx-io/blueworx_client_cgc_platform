@@ -2,7 +2,7 @@
 
 For the production dev team. Updated at the end of every milestone. Spec: `docs/BUILD_BRIEF.md`.
 
-Current state: **M1 Handicap engine, v0.2.3.** Checked: 119 PHPUnit tests and 4 Playwright tests pass.
+Current state: **M1 Handicap engine, v0.2.3.** Checked: 127 PHPUnit tests and 4 Playwright tests pass.
 
 ## What is real vs mocked
 
@@ -52,8 +52,9 @@ Choices made where the brief was silent (easy to change in `HandicapEngine`; con
 - Four-ball Stableford is scored per player on that player's own tee (`score_fourball` takes a `tee` per player). Matchplay `holes_from_gross` still takes one tee for stroke indexes.
 - A tee's course rating must be 40 to 90, its par 54 to 80, and each hole par 3 to 6.
 - Saving a lineup takes a MySQL named lock (`GET_LOCK`, `Db::lock()`) for the match before it starts the transaction, and releases it after commit or rollback. If the lock, the engine check or the locked read fails, nothing is written. On the SQLite test site the lock is skipped (one writer at a time already).
+- `Db::is_sqlite()` checks that `$wpdb` is the `WP_SQLite_DB` class (the drop-in defines `SQLITE_DB_DROPIN_VERSION` even on MySQL sites). Lock names are prefixed with a hash of the database name and table prefix. `Db::begin()` records `CONNECTION_ID()`, and `Db::commit()` fails if WordPress reconnected since (a retried write would have run outside the transaction).
 - `Db::begin()` fails closed: if the InnoDB check cannot be run, or a table is missing or not InnoDB, no transaction starts.
-- `Infrastructure/Migrations` runs before dbDelta on every install or upgrade (`CGC_DB_VERSION` 5): converts non-InnoDB plugin tables to InnoDB and removes duplicate snapshot rows (newest kept, each removal audited as `handicap.snapshot_duplicate_removed`).
+- `Infrastructure/Migrations` runs before dbDelta on every install or upgrade (`CGC_DB_VERSION` 5): converts non-InnoDB plugin tables to InnoDB and removes duplicate snapshot rows (newest kept, each removal audited as `handicap.snapshot_duplicate_removed`; the DELETE only matches while its audit row exists).
 - A per-team penalty tie is decided on the rounded shots each player receives; the first listed pays on a tie.
 - The lock, engine and upgrade code was only tested against a scripted database (`tests/Support/FakeWpdb.php`) and on SQLite. It has not run on real MySQL or MariaDB: do that before relying on it (two overlapping saves for one match, and an upgrade of a site whose tables are MyISAM).
 - The repositories are only tested through `tests/e2e/handicap-m1.spec.js` on the SQLite test site. Run it once on MySQL/MariaDB too.

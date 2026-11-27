@@ -15,10 +15,49 @@ namespace CGC\Championship\Infrastructure;
 final class Db {
 
 	/**
-	 * Whether the site runs on the SQLite test database instead of MySQL or MariaDB.
+	 * Connection id when the open transaction started (null when there is none, or on SQLite).
+	 *
+	 * @var string|null
+	 */
+	private static ?string $connection = null;
+
+	/**
+	 * Whether WordPress is really talking to SQLite (the test database) instead of MySQL or MariaDB.
+	 * The SQLite drop-in file defines its marker constant even on a site set to MySQL, so this asks
+	 * which database class is in use.
 	 */
 	public static function is_sqlite(): bool {
-		return defined( 'SQLITE_DB_DROPIN_VERSION' );
+		global $wpdb;
+		return $wpdb instanceof \WP_SQLite_DB;
+	}
+
+	/**
+	 * The database connection's id, or null on SQLite or when it cannot be read.
+	 *
+	 * WordPress reconnects and retries a statement when the server has gone away. A retried
+	 * statement runs on a new connection, outside the open transaction and without its locks.
+	 *
+	 * @phpstan-impure
+	 */
+	public static function connection_id(): ?string {
+		global $wpdb;
+		if ( self::is_sqlite() ) {
+			return null;
+		}
+		$id = $wpdb->get_var( 'SELECT CONNECTION_ID()' );
+		return null === $id ? null : (string) $id;
+	}
+
+	/**
+	 * Whether we are still on the connection the open transaction started on. Always true on SQLite.
+	 *
+	 * @phpstan-impure
+	 */
+	public static function connection_unchanged(): bool {
+		if ( self::is_sqlite() ) {
+			return true;
+		}
+		return null !== self::$connection && self::connection_id() === self::$connection;
 	}
 
 	/**
@@ -46,7 +85,15 @@ final class Db {
 		if ( array() !== $tables && ! self::can_roll_back( $tables ) ) {
 			return false;
 		}
-		return false !== $wpdb->query( 'START TRANSACTION' );
+		if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+			return false;
+		}
+		self::$connection = self::connection_id();
+		if ( ! self::is_sqlite() && null === self::$connection ) {
+			self::rollback();
+			return false;
+		}
+		return true;
 	}
 
 	/**
@@ -107,7 +154,9 @@ final class Db {
 	 */
 	public static function commit(): bool {
 		global $wpdb;
-		if ( false !== $wpdb->query( 'COMMIT' ) ) {
+		// On a new connection the transaction is already gone and the earlier writes are lost. Say so.
+		if ( self::connection_unchanged() && false !== $wpdb->query( 'COMMIT' ) ) {
+			self::$connection = null;
 			return true;
 		}
 		self::rollback();
@@ -120,6 +169,7 @@ final class Db {
 	public static function rollback(): void {
 		global $wpdb;
 		$wpdb->query( 'ROLLBACK' );
+		self::$connection = null;
 	}
 
 	/**
@@ -129,7 +179,7 @@ final class Db {
 	 *
 	 * The SQLite test site has one writer at a time already, so it always succeeds there.
 	 *
-	 * @param string $name    Lock name (64 characters at most).
+	 * @param string $name    Lock name, up to 50 characters. The site's database and prefix are added.
 	 * @param int    $seconds How long to wait for another request to finish.
 	 * @return bool Whether this request now holds the lock.
 	 */
@@ -138,7 +188,7 @@ final class Db {
 		if ( self::is_sqlite() ) {
 			return true;
 		}
-		$got = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', $name, $seconds ) );
+		$got = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', self::lock_name( $name ), $seconds ) );
 		return '1' === (string) $got;
 	}
 
@@ -152,6 +202,18 @@ final class Db {
 		if ( self::is_sqlite() ) {
 			return;
 		}
-		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $name ) );
+		$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', self::lock_name( $name ) ) );
+	}
+
+	/**
+	 * The name the server sees. MySQL lock names are shared by every database on the server, so the
+	 * database name and table prefix go in: two sites never wait for each other.
+	 *
+	 * @param string $name Lock name.
+	 */
+	private static function lock_name( string $name ): string {
+		global $wpdb;
+		$name = substr( md5( $wpdb->dbname . '|' . $wpdb->prefix ), 0, 12 ) . '_' . $name;
+		return strlen( $name ) <= 64 ? $name : substr( $name, 0, 12 ) . '_' . md5( $name ); // 12 + 1 + 32 characters.
 	}
 }

@@ -106,8 +106,8 @@ final class MigrationsTest extends TestCase {
 		$this->assertTrue( Migrations::remove_duplicate_snapshots() );
 		$deletes = $this->db->matching( '/^DELETE FROM/' );
 		$this->assertCount( 2, $deletes );
-		$this->assertStringContainsString( 'id=7', $deletes[0] );
-		$this->assertStringContainsString( 'id=4', $deletes[1] );
+		$this->assertStringContainsString( 'id = 7', $deletes[0] );
+		$this->assertStringContainsString( 'id = 4', $deletes[1] );
 		$this->assertCount( 2, $this->db->matching( '/^INSERT INTO wp_cgc_audit_log/' ), 'One audit row per removed row.' );
 		$this->assertNotNull( $this->db->position( '/^COMMIT/' ) );
 	}
@@ -119,5 +119,40 @@ final class MigrationsTest extends TestCase {
 		$this->assertFalse( Migrations::remove_duplicate_snapshots() );
 		$this->assertSame( array(), $this->db->matching( '/^DELETE FROM/' ) );
 		$this->assertNotNull( $this->db->position( '/^ROLLBACK/' ) );
+	}
+
+	public function test_each_delete_only_works_when_its_audit_row_exists(): void {
+		// If the connection dropped and WordPress retried the delete outside the transaction, the audit
+		// row would be gone. The delete itself must then match nothing.
+		$this->with_duplicates( array( '9', '7' ) );
+		$this->assertTrue( Migrations::remove_duplicate_snapshots() );
+
+		$delete = $this->db->matching( '/^DELETE FROM/' )[0];
+		$this->assertStringContainsString( 'EXISTS', $delete );
+		$this->assertStringContainsString( 'wp_cgc_audit_log', $delete );
+		$this->assertStringContainsString( 'handicap.snapshot_duplicate_removed', $delete );
+	}
+
+	public function test_a_delete_that_removes_nothing_undoes_the_step(): void {
+		$this->db->when( '/^DELETE FROM/', 0 );
+		$this->with_duplicates( array( '9', '7' ) );
+
+		$this->assertFalse( Migrations::remove_duplicate_snapshots() );
+		$this->assertNotNull( $this->db->position( '/^ROLLBACK/' ) );
+		$this->assertNull( $this->db->position( '/^COMMIT/' ) );
+	}
+
+	public function test_nothing_is_deleted_after_the_connection_changes(): void {
+		$calls = 0;
+		$this->db->when(
+			'/CONNECTION_ID/',
+			static function () use ( &$calls ): string {
+				return 1 === ++$calls ? '10' : '11';
+			}
+		);
+		$this->with_duplicates( array( '9', '7' ) );
+
+		$this->assertFalse( Migrations::remove_duplicate_snapshots() );
+		$this->assertSame( array(), $this->db->matching( '/^DELETE FROM/' ) );
 	}
 }

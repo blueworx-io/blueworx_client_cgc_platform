@@ -16,6 +16,8 @@ namespace CGC\Championship\Infrastructure;
  */
 final class Migrations {
 
+	private const AUDIT_ACTION = 'handicap.snapshot_duplicate_removed';
+
 	/**
 	 * Runs every step in order.
 	 *
@@ -91,16 +93,36 @@ final class Migrations {
 			array_shift( $rows ); // Keep the newest.
 			foreach ( $rows as $row ) {
 				$before = json_decode( (string) $row['snapshot_json'], true );
+				$reason = 'Upgrade removed duplicate handicap snapshot row ' . (int) $row['id'] . ' for player ' . (int) $group['player_id'] . ' (kept the newest).';
 				$logged = AuditLogger::log(
-					'handicap.snapshot_duplicate_removed',
+					self::AUDIT_ACTION,
 					'match',
 					(int) $group['match_id'],
-					'Upgrade removed a duplicate handicap snapshot for player ' . (int) $group['player_id'] . ' (kept the newest).',
+					$reason,
 					is_array( $before ) ? $before : null,
 					null,
 					(int) $group['tenant_id']
 				);
-				if ( false === $logged || false === $wpdb->delete( $table, array( 'id' => (int) $row['id'] ) ) ) {
+				// WordPress retries a statement on a new connection if the server drops us. That retry would run
+				// outside this transaction, so check the connection, and let the delete work only while its audit row exists.
+				if ( false === $logged || ! Db::connection_unchanged() ) {
+					Db::rollback();
+					return false;
+				}
+				$deleted = $wpdb->query(
+					$wpdb->prepare(
+						'DELETE FROM %i WHERE id = %d AND EXISTS ( SELECT 1 FROM %i WHERE tenant_id = %d AND action = %s AND entity_type = %s AND entity_id = %d AND reason = %s )',
+						$table,
+						(int) $row['id'],
+						Schema::table( 'audit_log' ),
+						(int) $group['tenant_id'],
+						self::AUDIT_ACTION,
+						'match',
+						(int) $group['match_id'],
+						$reason
+					)
+				);
+				if ( 1 !== $deleted || ! Db::connection_unchanged() ) {
 					Db::rollback();
 					return false;
 				}
