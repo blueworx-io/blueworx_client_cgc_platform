@@ -1,5 +1,6 @@
 # Changelog
-n## 0.2.2
+
+## 0.2.2
 
 - Handover notes brought up to date for M1 (version and test counts). No code change.
 
