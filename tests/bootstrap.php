@@ -50,3 +50,40 @@ if ( ! function_exists( '__' ) ) {
 		return $text;
 	}
 }
+
+if ( ! defined( 'ARRAY_A' ) ) {
+	define( 'ARRAY_A', 'ARRAY_A' );
+}
+
+require_once __DIR__ . '/Support/WpErrorStub.php';
+
+if ( ! function_exists( 'is_wp_error' ) ) {
+	/**
+	 * Stub of is_wp_error().
+	 *
+	 * @param mixed $thing Value.
+	 */
+	function is_wp_error( mixed $thing ): bool {
+		return $thing instanceof WP_Error;
+	}
+}
+
+if ( ! function_exists( 'wp_json_encode' ) ) {
+	/**
+	 * Stub of wp_json_encode().
+	 *
+	 * @param mixed $value Value.
+	 */
+	function wp_json_encode( mixed $value ): string|false {
+		return json_encode( $value );
+	}
+}
+
+if ( ! function_exists( 'get_current_user_id' ) ) {
+	/**
+	 * Stub of get_current_user_id().
+	 */
+	function get_current_user_id(): int {
+		return 7;
+	}
+}

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.3
+
+- Review fixes for M1 (database safety on MySQL/MariaDB): saving a match lineup now takes a lock for that match first, so two overlapping first saves cannot mix lineups, and it stops if the lock or the locked read fails. The lock name includes the database name and table prefix, so two sites on one server never wait for each other.
+- A failed "can this table roll back?" check now stops the write instead of allowing it. The plugin asks which database class WordPress really uses (the SQLite drop-in's marker is also defined on MySQL sites), so these checks are never skipped on MySQL. A commit on a new connection (WordPress reconnected mid-save) counts as a failure.
+- Upgrades convert any MyISAM plugin table to InnoDB and remove duplicate lineup snapshots (keeping the newest) before the unique key is added. Each delete only works while its audit row exists, and the step stops if the connection changed. The database version is now 5 so existing sites run this once.
+- While a match lock or a database transaction is open, WordPress is stopped from quietly reconnecting and re-running a write on a new connection (that write would be saved outside the transaction). The connection is checked when the transaction starts and before and after the commit, and any change counts as a failed save. Each duplicate delete in the upgrade is tied to its own audit row.
+- If the lock query itself fails (a dropped connection, or a Galera or Percona cluster that does not allow GET_LOCK), saving a lineup now says the database would not give the lock, keeps the server message for the logs, and writes nothing. It no longer claims the wait is the problem. A real wait that ran out still says another change is in progress.
+- A team penalty tie is now decided on the rounded shots each player receives (first listed pays on a tie).
+
+## 0.2.2
+
+- Handover notes brought up to date for M1 (version and test counts). No code change.
+
 ## 0.2.1
 
 - Review fixes for M1: overlapping lineup saves wait for each other, saving needs tables that can roll back (new tables are created as InnoDB), course deletion removes tees and holes in one step, a team penalty goes to the player with the most shots, a fake tier no longer skips the minimum rounds, and text such as "d" is refused where a whole number is needed.

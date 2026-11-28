@@ -8,4 +8,8 @@
 declare(strict_types=1);
 
 define( 'CGC_VERSION', '0.1.0' );
-define( 'CGC_DB_VERSION', '4' );
+define( 'CGC_DB_VERSION', '5' );
+
+// The SQLite drop-in's database class exists only on the SQLite test site. The test stub is the one
+// definition of it, so load that file here instead of declaring the class a second time.
+require_once __DIR__ . '/Support/SqliteDbStub.php';
